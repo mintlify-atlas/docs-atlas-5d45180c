@@ -1,0 +1,104 @@
+---
+title: "Known issues and limitations in Arclight"
+description: "Arclight bridges two incompatible ecosystems. This page documents known edge cases, current limitations, workarounds, and where to get help."
+---
+
+Arclight merges two systems — Bukkit's plugin framework and a Minecraft mod loader — that were never designed to run together. Most combinations of mods and plugins work without incident, but some edge cases arise from fundamental differences in how each system manages classes, commands, and events. This page documents the known categories of issues.
+
+<Warning>
+  Always test your full mod and plugin combination on a staging server before deploying to production. Interactions between specific mods and plugins can be difficult to predict and are safer to discover in a non-critical environment.
+</Warning>
+
+## Known issue categories
+
+<AccordionGroup>
+  <Accordion title="NMS plugins: mapping differences">
+    Plugins that access Minecraft internals via `net.minecraft.server` (NMS) classes use obfuscated or version-mapped class, field, and method names. Arclight runs inside a mod loader that uses its own mapping scheme, so the names a plugin expects may not match what is available at runtime.
+
+    Arclight's runtime remapper handles many common NMS access patterns automatically. However, plugins that use `Class.forName()`, `getDeclaredField()`, or `getDeclaredMethod()` with hard-coded strings pointing at specific internal names can bypass the remapper and throw `ClassNotFoundException` or `NoSuchFieldException` at runtime.
+
+    **Workaround:** Use the public Bukkit API wherever possible. If a plugin must access internals, its author needs to update it to account for the mapped environment, or use Arclight's remapper-friendly patterns.
+  </Accordion>
+
+  <Accordion title="Enum extension conflicts">
+    Bukkit defines many game concepts as Java enums (for example, `org.bukkit.TreeType`, `org.bukkit.Material`). Arclight extends these enums at startup to cover mod-added content — for instance, it adds a `MOD` entry to `TreeType` to represent mod-added tree variants.
+
+    Some mods also extend enums, or assume a fixed set of enum values. When both Arclight and a mod attempt to add entries to the same enum, or when a mod iterates over an enum with a hard-coded `switch` statement, the extra values can cause `IllegalArgumentException` or unexpected `default` branch behavior.
+
+    **Workaround:** There is no general workaround; this requires cooperation between Arclight and the mod in question. Report conflicts on GitHub with details about which enum and which mod is involved.
+  </Accordion>
+
+  <Accordion title="Class loader isolation">
+    Plugins and mods are loaded by different class loaders. By design, a plugin cannot directly `import` or cast to a mod class at compile time, and a mod cannot directly reference plugin classes. Cross-access is limited to what is exposed through the Bukkit API (for example, through `Entity`, `ItemStack`, or `PersistentDataContainer`).
+
+    Plugins that attempt to use `Class.forName()` to load mod classes may succeed in some cases, but the resulting classes cannot be cast to types that the plugin's own class loader does not know about. This is a fundamental constraint of the two-class-loader architecture, not a bug.
+
+    **Workaround:** Use Arclight's Bukkit API extensions or the standard Bukkit API to interact with mod-added content. Avoid cross-class-loader casts.
+  </Accordion>
+
+  <Accordion title="Command conflicts">
+    When both a mod and a Bukkit plugin register a command with the same name, Arclight must decide which one takes precedence. Arclight's `CommandNodeHooks` system manages the Brigadier command tree and handles removal and replacement of command nodes, but the exact resolution order depends on the load sequence.
+
+    Symptoms include a command that silently does nothing, throws a permission error, or executes the wrong handler.
+
+    **Workaround:** Rename the command on one side (via the plugin's `plugin.yml` or the mod's command registration), or use Arclight's command dispatch configuration if one is available for your version.
+  </Accordion>
+
+  <Accordion title="Event ordering: Forge/Fabric and Bukkit events">
+    Arclight fires Bukkit events by hooking into Minecraft's logic at specific points. Forge and Fabric also fire their own events at similar points. The two event systems are not synchronized — a Forge event and its Bukkit equivalent do not share a cancellation flag, and side effects applied in one system are not visible to handlers in the other until the next common synchronization point.
+
+    In practice this means:
+
+    - A Forge event handler that cancels an action may run *after* the corresponding Bukkit event has already been processed.
+    - A Bukkit event listener that modifies entity state may run before the Forge event for the same action, causing the Forge handler to see stale values.
+
+    **Workaround:** Avoid registering handlers for the same game action in both systems. Pick one system per action and handle it there.
+  </Accordion>
+</AccordionGroup>
+
+## Checking the current status
+
+The GitHub Issues tracker is the authoritative list of open and resolved issues:
+
+- [Open issues](https://github.com/IzzelAliz/Arclight/issues) — active bugs and reports
+- [GitHub Discussions](https://github.com/IzzelAliz/Arclight/discussions) — questions, configuration help, and community support
+
+Before opening a new issue, search existing issues to see if your problem has already been reported. The bug report template asks for specific information that helps the team diagnose issues quickly.
+
+<Info>
+  When filing a bug report, confirm that the issue cannot be reproduced on a plain Spigot server (for plugin issues) or on a plain Forge/NeoForge/Fabric server (for mod issues). Issues that exist independently of Arclight are not Arclight bugs.
+</Info>
+
+## Getting help
+
+<CardGroup cols={2}>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/IzzelAliz/Arclight/issues">
+    Report bugs and track known problems.
+  </Card>
+  <Card title="GitHub Discussions" icon="message-circle" href="https://github.com/IzzelAliz/Arclight/discussions">
+    Ask questions and get community support.
+  </Card>
+  <Card title="Common errors" icon="wrench" href="/troubleshooting/common-errors">
+    Specific error messages and how to fix them.
+  </Card>
+  <Card title="FAQ" icon="circle-help" href="/troubleshooting/faq">
+    Answers to frequently asked questions.
+  </Card>
+</CardGroup>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Plugin compatibility" icon="plug" href="/compatibility/plugins">
+    Which Bukkit plugins work and what to watch for.
+  </Card>
+  <Card title="Mod compatibility" icon="puzzle-piece" href="/compatibility/mods">
+    Which mods work and which have explicit integration support.
+  </Card>
+  <Card title="Remapper" icon="arrows-left-right" href="/development/remapper">
+    How the runtime remapper handles NMS class references.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/development/architecture">
+    How Arclight bridges the mod loader and Bukkit internally.
+  </Card>
+</CardGroup>

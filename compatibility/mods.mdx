@@ -1,0 +1,107 @@
+---
+title: "Mod compatibility and known integrations"
+description: "Most Forge, NeoForge, and Fabric mods run on Arclight without changes. Learn which mods have special handling and what conflicts to watch for."
+---
+
+Arclight is built on top of Forge, NeoForge, or Fabric depending on which variant you are running. Because the mod loader is fully present, the overwhelming majority of mods load and run exactly as they would on a plain modded server — no changes are required on the mod author's side.
+
+That said, Arclight also injects Bukkit's plugin system, a runtime remapper, and a set of mixins. A small number of mods interact with the same systems Arclight hooks into, so Arclight ships dedicated compatibility code for them.
+
+## Known integrations
+
+The following mods are explicitly recognized in Arclight's source and receive special handling at runtime.
+
+<CardGroup cols={2}>
+  <Card title="Immersive Portals" icon="door-open">
+    Identified by mod ID `immersive_portals`. Arclight includes compatibility hooks to handle the non-standard world-traversal behavior this mod introduces, which would otherwise interfere with Bukkit's world and entity tracking.
+  </Card>
+  <Card title="Lithium / Canary / Radium" icon="bolt">
+    These three mods (IDs: `lithium`, `canary`, `radium`) are all performance-optimization forks of the same lineage. Arclight detects their presence and adjusts its own optimization mixin behavior to avoid conflicts with the patches they apply to server internals.
+  </Card>
+  <Card title="Recruits" icon="users">
+    Identified by mod ID `recruits`. Arclight includes compatibility handling for this mod, which adds custom entity types that interact with Bukkit's entity event system in ways that require explicit integration.
+  </Card>
+  <Card title="Astral Sorcery" icon="star">
+    Arclight ships `AstralSorceryHooks`, which detects whether `hellfirepvp.astralsorcery.common.entity.InteractableEntity` is present at runtime and adjusts entity-interaction logic accordingly. This prevents incorrect Bukkit interaction events from firing for Astral Sorcery's custom interactable entities.
+  </Card>
+</CardGroup>
+
+## Arclight's own optimizations
+
+Arclight bundles a set of optional performance mixins that activate automatically based on what other mods are present. These cover:
+
+- **Activation range** — reduces unnecessary ticking of distant entities
+- **Chunk loading** — optimizes when and how chunks are loaded by the server
+- **Tracking range** — adjusts which entities are sent to nearby clients
+- **Network** — reduces redundant packet work
+- **Real-time scheduling** — fine-grained tick timing
+
+When a known optimization mod such as Lithium, Canary, or Radium is detected, Arclight's overlapping optimization mixins are disabled to let the dedicated mod handle those paths. This is managed automatically — you do not need to configure anything.
+
+## General mod compatibility
+
+<AccordionGroup>
+  <Accordion title="Mods that replace the server tick loop">
+    Arclight hooks into Minecraft's main server tick at several points to fire Bukkit events in the correct order. Mods that replace or substantially restructure the tick loop — for example, mods that implement a custom scheduler or rewrite `MinecraftServer.runServer()` — may cause Bukkit events to fire out of order or not at all. This is a rare pattern but worth checking if you see event-related issues with a specific mod.
+  </Accordion>
+  <Accordion title="Mods that target the same classes as Arclight's mixins">
+    Arclight uses the Mixin system extensively to inject Bukkit behavior into Minecraft classes. If another mod applies a mixin to the same method and the two mixins conflict (for example, both try to cancel the same method call), the result depends on mixin priority and injection order. Arclight processes its mixins through a plugin pipeline (`ArclightMixinPlugin`) that applies additional transformations, which can make conflicts harder to diagnose.
+
+    If you suspect a mixin conflict, run the server with only Arclight and the suspected mod installed to confirm whether it is a direct conflict, then report it on GitHub.
+  </Accordion>
+  <Accordion title="Mods that use Unsafe or internal JVM APIs against patched classes">
+    Arclight transforms many Minecraft classes before they are loaded. Mods that cache field offsets or method handles against unpatched class layouts at startup (for example, using `sun.misc.Unsafe.objectFieldOffset`) may read incorrect data if those classes have been structurally modified by Arclight's mixins.
+  </Accordion>
+</AccordionGroup>
+
+## Installing mods
+
+Mods are installed the same way as on a plain modded server. Place `.jar` files in the `mods/` folder alongside the Arclight server JAR.
+
+```
+server/
+├── arclight-forge-1.21.1.jar
+├── mods/
+│   ├── my-mod-1.0.jar
+│   └── another-mod-2.3.jar
+└── plugins/
+    └── my-plugin-1.5.jar
+```
+
+<Note>
+  Make sure the mod is built for the correct mod loader (Forge, NeoForge, or Fabric) and Minecraft version. Arclight does not bridge between mod loaders — a Fabric mod will not load on Arclight Forge, and vice versa.
+</Note>
+
+## Reporting a mod compatibility issue
+
+Before opening a report, confirm that the problem does not reproduce on a plain Forge/NeoForge/Fabric server without Arclight. Bugs that exist on the base mod loader are not Arclight issues.
+
+When you open a [GitHub issue](https://github.com/IzzelAliz/Arclight/issues), include:
+
+- The Arclight version (printed at server startup)
+- The Minecraft version and mod loader variant
+- The mod name, mod ID, and version
+- The full mod list (use `/forge mods` on Forge, or check startup logs on Fabric and NeoForge)
+- The relevant section of `logs/latest.log`
+- Steps to reproduce the problem
+
+<Tip>
+  Narrowing down the mod list to the smallest set that reproduces the issue dramatically speeds up diagnosis. Remove mods one at a time until the problem disappears, then report the minimal reproduction.
+</Tip>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Plugin compatibility" icon="plug" href="/compatibility/plugins">
+    Which Bukkit plugins work and what may cause issues.
+  </Card>
+  <Card title="Known issues" icon="triangle-alert" href="/compatibility/known-issues">
+    Edge cases and limitations across the plugin–mod bridge.
+  </Card>
+  <Card title="Mixin system" icon="layers" href="/development/mixin-system">
+    How Arclight's mixin pipeline works under the hood.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/development/architecture">
+    Overview of how Arclight connects the mod loader and Bukkit.
+  </Card>
+</CardGroup>

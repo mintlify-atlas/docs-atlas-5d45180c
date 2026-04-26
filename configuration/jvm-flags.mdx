@@ -1,0 +1,136 @@
+---
+title: "JVM flags and system properties for Arclight"
+description: "Reference for Arclight system properties and JVM arguments — debugging flags, extraction controls, heap sizing, and GC tuning for Java 21 servers."
+---
+
+Arclight runs on Java 21 and exposes several system properties that control its bootstrap and debugging behavior. You pass system properties with the `-D` prefix before the `-jar` argument; JVM arguments (such as heap size) go before `-D` flags as well. This page documents all Arclight-specific properties drawn from the build configuration, alongside recommended JVM arguments for production servers.
+
+## Java version requirement
+
+Arclight requires **Java 21**. The build toolchain targets Java 21 (`JavaLanguageVersion.of(21)`) and the bootstrap source compiles against it. Earlier JVM versions are not supported and will fail to start.
+
+```bash
+java -version   # must print version 21 or later
+```
+
+<Warning>
+  Do not use Java 17 or Java 8 with Arclight. While the `applaunch` bootstrap source compiles to Java 8 bytecode for legacy compatibility, the server itself requires a Java 21 runtime. Starting with an older JVM will result in `UnsupportedClassVersionError` errors.
+</Warning>
+
+## System properties reference
+
+System properties are set with `-Dproperty=value` on the Java command line. All Arclight-specific properties are optional; omitting them leaves the default behavior in place.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `terminal.ansi` | boolean | `false` | Enables ANSI color codes in console output. Set to `true` for terminals that support color (most Linux/macOS terminals and modern Windows Terminal). |
+| `mixin.debug.export` | boolean | `false` | Exports every Mixin-transformed class file to `.mixin.out/` on disk. Useful when debugging Mixin application failures or inspecting how Arclight patches vanilla classes. Has a meaningful performance and disk I/O cost — do not use in production. |
+| `mixin.dumpTargetOnFailure` | boolean | `false` | Dumps the target class bytecode to `.mixin.out/` when a Mixin fails to apply. Combine with `mixin.debug.export` to get full before-and-after class files when diagnosing Mixin errors. |
+| `arclight.alwaysExtract` | boolean | `false` | Forces Arclight to re-extract its embedded JARs (the CraftBukkit layer, Gson, and others) on every startup even when they already exist. Use this when upgrading Arclight to ensure stale extracted files are replaced. |
+| `arclight.remapper.dump` | string path | *(disabled)* | Path to a directory where the remapper writes transformed plugin class files after remapping. For example, `-Darclight.remapper.dump=./.mixin.out/plugin_classes`. Useful when debugging plugin class remapping issues. |
+| `sun.stdout.encoding` | string | *(JVM default)* | Forces the encoding of standard output. Set to `UTF-8` to ensure plugin messages with non-ASCII characters are not mangled in logs. |
+| `sun.stderr.encoding` | string | *(JVM default)* | Forces the encoding of standard error. Set to `UTF-8` alongside `sun.stdout.encoding`. |
+
+## JVM arguments reference
+
+JVM arguments control the Java Virtual Machine itself and are placed before any `-D` properties on the command line.
+
+| Argument | Description |
+|----------|-------------|
+| `-Xms<size>` | Initial heap size. Setting this equal to `-Xmx` avoids heap resize pauses. Use at least `2G` for small servers and `4G` or more for servers with many mods and plugins. |
+| `-Xmx<size>` | Maximum heap size. The `runProd*` Gradle tasks use `4G` as a reference value. Increase based on your mod list and player count. |
+| `-XX:+UseG1GC` | Selects the G1 garbage collector, which handles large heaps with shorter pause times than the default collector. Recommended for Minecraft servers. |
+| `-XX:MaxGCPauseMillis=200` | Soft target for G1 GC pause time in milliseconds. Lower values trade throughput for shorter pauses. `200` is a common starting point. |
+| `-XX:+ParallelRefProcEnabled` | Processes GC reference objects in parallel. Reduces GC pause duration on multi-core machines. |
+| `-XX:+UnlockExperimentalVMOptions` | Required to enable some advanced GC flags. Pair with `-XX:+UseZGC` if you prefer ZGC on Java 21. |
+| `--add-opens` | Arclight's mod loader handles most module open requirements automatically. You should not need to add `--add-opens` flags manually unless a specific plugin requires it. |
+
+## Example command lines
+
+<CodeGroup>
+
+```bash Production (Forge)
+java \
+  -Xms4G -Xmx4G \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+ParallelRefProcEnabled \
+  -Dterminal.ansi=true \
+  -Dsun.stdout.encoding=UTF-8 \
+  -Dsun.stderr.encoding=UTF-8 \
+  -jar arclight-forge-*.jar nogui
+```
+
+```bash Production (NeoForge)
+java \
+  -Xms4G -Xmx4G \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+ParallelRefProcEnabled \
+  -Dterminal.ansi=true \
+  -Dsun.stdout.encoding=UTF-8 \
+  -Dsun.stderr.encoding=UTF-8 \
+  -jar arclight-neoforge-*.jar nogui
+```
+
+```bash Production (Fabric)
+java \
+  -Xms4G -Xmx4G \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+ParallelRefProcEnabled \
+  -Dterminal.ansi=true \
+  -Dsun.stdout.encoding=UTF-8 \
+  -Dsun.stderr.encoding=UTF-8 \
+  -jar arclight-fabric-*.jar nogui
+```
+
+```bash Debug (all platforms)
+java \
+  -Xms2G -Xmx4G \
+  -Dterminal.ansi=true \
+  -Dmixin.debug.export=true \
+  -Dmixin.dumpTargetOnFailure=true \
+  -Darclight.alwaysExtract=true \
+  -Darclight.remapper.dump=./.mixin.out/plugin_classes \
+  -Dsun.stdout.encoding=UTF-8 \
+  -Dsun.stderr.encoding=UTF-8 \
+  -jar arclight-forge-*.jar nogui
+```
+
+</CodeGroup>
+
+<Note>
+  The debug command line matches the flags used by the `runProdForge`, `runProdNeoforge`, and `runProdFabric` Gradle tasks in the Arclight build. Do not use all of these flags in production — `mixin.debug.export` and `arclight.remapper.dump` write large amounts of data to disk.
+</Note>
+
+## Heap sizing guidelines
+
+| Server profile | `-Xms` | `-Xmx` |
+|----------------|--------|--------|
+| Vanilla + a few plugins | `1G` | `2G` |
+| Light modpack + plugins | `2G` | `4G` |
+| Medium modpack (50–150 mods) | `4G` | `6G` |
+| Heavy modpack (150+ mods) | `4G` | `8G`+ |
+
+Setting `-Xms` equal to `-Xmx` is generally recommended for servers to avoid heap expansion pauses. Monitor actual heap usage with a tool like `jconsole` or a server profiler after initial startup to tune these values for your specific mod list.
+
+## Garbage collector notes
+
+Java 21 ships with G1GC as the default collector and ZGC as a well-supported alternative. G1GC is the standard choice for Minecraft servers because it balances throughput and pause times well on typical heap sizes (2–8 GB). ZGC offers lower maximum pause times but has higher memory overhead, which can matter on memory-constrained hosts.
+
+```bash ZGC alternative
+java \
+  -Xms4G -Xmx4G \
+  -XX:+UnlockExperimentalVMOptions \
+  -XX:+UseZGC \
+  -Dterminal.ansi=true \
+  -jar arclight-forge-*.jar nogui
+```
+
+## Related pages
+
+- [Configure Arclight server behavior](/configuration/arclight-config) — `arclight.conf` options including debug and extraction controls
+- [Spigot configuration in Arclight servers](/configuration/spigot-config) — `spigot.yml` settings for mixed mod-and-plugin servers
+- [Mixin system](/development/mixin-system) — how Arclight's Mixin pipeline works, relevant when using `mixin.debug.export`
+- [Common errors](/troubleshooting/common-errors) — startup failures often related to Java version or flag misconfiguration

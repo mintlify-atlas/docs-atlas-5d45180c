@@ -1,0 +1,234 @@
+---
+title: "Runtime plugin class remapper in Arclight"
+description: "How Arclight translates plugin bytecode from CraftBukkit's obfuscated NMS names to the Mojang-mapped names used by Forge, NeoForge, and Fabric."
+---
+
+Plugins compiled against CraftBukkit reference Minecraft internals through the `net.minecraft.server` (NMS) package using Spigot's obfuscated class and method names. Mod loaders, by contrast, use either Mojang's official mappings or an intermediary name scheme. Arclight bridges this gap with a runtime class remapper that transparently rewrites plugin bytecode before it is defined in the JVM.
+
+## Why remapping is necessary
+
+When you write a plugin that calls `((CraftPlayer) player).getHandle().connection.send(packet)`, the field `connection` and the `send` method are referenced by the names Spigot chose for them — names that differ from what Forge or Fabric expose. If Arclight loaded the plugin bytecode unchanged, every such reference would throw `NoSuchFieldError` or `NoSuchMethodError` at runtime.
+
+The remapper intercepts class loading, rewrites the constant pool to use the correct names for the current mod loader, and then defines the rewritten bytecode. From that point on the class behaves exactly as if it had been compiled against the mod loader's naming scheme.
+
+## Remapping pipeline
+
+```
+Plugin JAR
+   │
+   ▼
+ArclightClassCache ──────────────────────► Cache hit → return cached bytes
+   │ (miss)
+   ▼
+ClassLoaderRemapper.remap(bytes)
+   │
+   ├─► ArclightInterfaceInvokerGen   generate bridge methods for NMS interfaces
+   │
+   ├─► ArclightRedirectAdapter       rewrite reflection calls (Class.forName,
+   │                                 Method.invoke, ClassLoader.defineClass …)
+   │
+   ├─► ClassLoaderAdapter            fix ClassLoader references
+   │
+   ├─► PluginLoggerTransformer       redirect java.util.logging to Log4j
+   │                                 (if JUL-to-Log4j bridge is absent)
+   │
+   ├─► PluginPatcher(s)              per-plugin compatibility patches
+   │                                 (WorldEdit, etc.)
+   │
+   └─► JarRemapper (SpecialSource)   rename classes/methods/fields using
+                                     bukkit_srg.srg / bukkit_moj.srg
+                                     + inheritanceMap.txt
+   │
+   ▼
+Rewritten bytecode → ClassLoader.defineClass()
+   │
+   ▼
+ArclightClassCache.addToCache()      persist for next server start
+```
+
+## `ArclightRemapper`: the singleton coordinator
+
+`ArclightRemapper` is initialised as a static singleton when the class is first loaded. It constructs three `JarMapping` instances from resources bundled in the JAR:
+
+| Mapping | Resource file | Direction |
+|---|---|---|
+| `toNmsMapping` | `bukkit_srg.srg` | Bukkit obf names → Mojang/SRG names |
+| `toBukkitMapping` | `bukkit_srg.srg` (reversed) | Mojang/SRG names → Bukkit obf names |
+| `fromMojMapping` | `bukkit_moj.srg` (reversed) | Mojang names → Bukkit obf names |
+
+```java
+this.toNmsMapping.loadMappings(
+    new BufferedReader(new InputStreamReader(
+        ArclightRemapper.class.getResourceAsStream("/bukkit_srg.srg"))),
+    null, null, false
+);
+this.toBukkitMapping.loadMappings(
+    new BufferedReader(new InputStreamReader(
+        ArclightRemapper.class.getResourceAsStream("/bukkit_srg.srg"))),
+    null, null, true  // reversed
+);
+this.fromMojMapping.loadMappings(
+    new BufferedReader(new InputStreamReader(
+        ArclightRemapper.class.getResourceAsStream("/bukkit_moj.srg"))),
+    null, null, true
+);
+```
+
+An `InheritanceMap` is loaded from `inheritanceMap.txt` and wired into every `JarMapping` so that method inheritance is resolved correctly when renaming inherited methods. A `JointProvider` combines the inheritance map with the system class loader for classes that are not in the plugin JARs.
+
+`ArclightRemapper.createClassLoaderRemapper(ClassLoader)` is the factory used by `PluginClassLoaderMixin` to create a per-plugin-loader `ClassLoaderRemapper`.
+
+## `ClassLoaderRemapper`: per-plugin-loader remapping
+
+Each plugin class loader gets its own `ClassLoaderRemapper` instance. This is important because different plugins may have different inheritance trees, and the remapper needs access to each plugin's classes when resolving inheritance during renaming.
+
+`ClassLoaderRemapper` also generates a per-instance **reflection handler class** (`generatedHandlerClass`) at runtime. This generated class is referenced by `ArclightRedirectAdapter` to route reflection calls through a version that understands the remapping context.
+
+## `RemappingClassLoader`: the integration interface
+
+Plugin class loaders that participate in the remapping system implement the `RemappingClassLoader` interface:
+
+```java
+public interface RemappingClassLoader {
+    ClassLoaderRemapper getRemapper();
+    ArclightRemapConfig getRemapConfig();
+}
+```
+
+`ArclightRemapConfig` is a simple record that currently carries a single flag:
+
+```java
+public record ArclightRemapConfig(boolean remap) {
+    public static final ArclightRemapConfig PLUGIN = new ArclightRemapConfig(true);
+}
+```
+
+Setting `remap = false` disables name translation for that class loader, which is used for library loaders that load dependencies that do not reference NMS names.
+
+## Mapping files
+
+| File | Role |
+|---|---|
+| `bukkit_srg.srg` | Primary Bukkit-to-Mojang/SRG name translation table |
+| `bukkit_moj.srg` | Supplementary Mojang-to-Bukkit translation table |
+| `inheritanceMap.txt` | Pre-computed class hierarchy for correct method resolution |
+| `bukkit.at` | Forge access transformers to open private Minecraft members |
+| `extra_mapping.tsrg` | Additional name mappings for members that SpecialSource misses |
+
+`bukkit.at` and `extra_mapping.tsrg` are referenced in the root `build.gradle` `arclight` block and are processed by `ArclightGradlePlugin` during the build to produce the bundled `.srg` files.
+
+## `ArclightClassCache`: avoiding redundant remapping
+
+Remapping every class on every server start is expensive. `ArclightClassCache` persists the rewritten bytecode to disk under `.arclight/class_cache/`:
+
+```
+.arclight/
+  class_cache/
+    .version       ← current version string (Arclight version + patcher versions)
+    index/
+      <sha256>     ← index file mapping class names to blob offsets
+    blob/
+      <sha256>     ← raw remapped bytecode, appended sequentially
+```
+
+The cache is keyed by a SHA-256 hash of the plugin JAR. When Arclight starts it compares a version string (which includes the Arclight implementation version and the version of every `PluginPatcher`) against the stored `.version` file. If they differ the entire cache directory is deleted and rebuilt — this ensures stale caches are never used after an Arclight upgrade.
+
+The `CacheSegment` interface lets `ArclightClassCache` return cached bytes for a class name given an `ArclightRemapConfig`, or accept new bytes to write into the cache asynchronously.
+
+<Tip>
+  You can disable the class cache by setting `optimization.cache-plugin-class = false` in `arclight.conf`. This slows down startup but is useful when debugging remapping issues.
+</Tip>
+
+## `ArclightRedirectAdapter`: intercepting reflection
+
+Plugins that use reflection to access NMS often look up class names or field names as strings. The `ArclightRedirectAdapter` transformer rewrites these calls at the bytecode level, replacing them with calls to a generated handler that translates the string arguments through the remapper before delegating to the real JDK method.
+
+Affected calls include:
+
+```java
+// These are replaced in plugin bytecode:
+Class.forName("net.minecraft.server.v1_21_R1.EntityPlayer")
+someClass.getField("connection")
+someClass.getDeclaredMethod("send", ...)
+MethodHandles.lookup().findVirtual(...)
+ClassLoader.loadClass(...)
+Class.getResource(...)
+```
+
+The replacements route through the per-loader `ArclightReflectionHandler` generated by `ClassLoaderRemapper`, which translates the name arguments using the same mappings applied to the bytecode.
+
+## `ArclightInterfaceInvokerGen`: generating bridge methods
+
+When a plugin class extends a Minecraft class and the plugin uses an NMS method name that has been renamed by remapping, the JVM will not find the overridden method via normal dispatch. `ArclightInterfaceInvokerGen` detects this case by checking whether a plugin class (or one of its supertypes) extends a `net/minecraft/` class that implements an interface with renamed methods. If so, it generates a synthetic forwarding method under the old name that calls the remapped version:
+
+```java
+// Generated synthetic method inserted into plugin bytecode:
+public synthetic void send(Packet<?> packet) {
+    this.m_143352_(packet); // remapped name
+}
+```
+
+This means plugins that override NMS methods continue to receive calls even after the method name has changed in the mapping.
+
+## `ArclightEnumExtender`: extending Bukkit enums for mod types
+
+Bukkit enums like `Material`, `EntityType`, and `World.Environment` are closed Java enums. When mods register new blocks, items, or entities, Arclight needs to add new constants to these enums at runtime so plugins can reference them. `ArclightEnumExtender.process` does this by directly modifying the enum's `<clinit>` bytecode:
+
+1. It removes the `final` flag from the `$VALUES` array field.
+2. For each new name that is not already present, it creates a new `FieldNode` with the standardised uppercase constant name and inserts bytecode to instantiate and store it.
+3. It replaces the `$VALUES` array with a larger array that contains both the original constants and the new ones.
+
+```java
+// Example: mod registers "mymod:my_block"
+// ArclightEnumExtender adds Material.MYMOD_MY_BLOCK at runtime
+ArclightEnumExtender.process(materialClassNode, List.of("mymod:my_block"));
+```
+
+The standardisation step converts the namespaced key to an uppercase, alphanumeric-only string (`mymod:my_block` → `MYMOD_MY_BLOCK`).
+
+## Debugging remapping problems
+
+<Steps>
+  <Step title="Enable class dump">
+    Start the server with the system property `-Darclight.remapper.dump=<path>`. Arclight will write every remapped class as a `.class` file under that directory. You can then use `javap -c` or a decompiler to inspect what the remapped bytecode looks like.
+
+    ```bash
+    java -Darclight.remapper.dump=./remapper-dump -jar arclight-forge-1.21.1.jar
+    ```
+  </Step>
+  <Step title="Check the mapping files">
+    Confirm that the class, method, or field you are debugging is present in `bukkit_srg.srg`. Extract the JAR and search the file:
+
+    ```bash
+    jar -xf arclight-forge-1.21.1.jar bukkit_srg.srg
+    grep "YourClassName" bukkit_srg.srg
+    ```
+  </Step>
+  <Step title="Clear the class cache">
+    If you suspect a stale cache, delete `.arclight/class_cache/` and restart. Arclight will remap everything from scratch.
+
+    ```bash
+    rm -rf .arclight/class_cache/
+    ```
+  </Step>
+  <Step title="Check for inheritance issues">
+    If a method call throws `AbstractMethodError` at runtime, the inheritance remapping may have missed a supertype. Check `inheritanceMap.txt` for the relevant class hierarchy and report it on the Arclight issue tracker.
+  </Step>
+</Steps>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Architecture overview" href="/development/architecture">
+    The module structure and how BukkitRegistry maps mod types to Bukkit types.
+  </Card>
+  <Card title="Mixin system" href="/development/mixin-system">
+    How the PluginClassLoaderMixin hooks the remapper into CraftBukkit's class loading.
+  </Card>
+  <Card title="Plugin compatibility" href="/compatibility/plugins">
+    Which plugins work with Arclight and known remapping edge cases.
+  </Card>
+  <Card title="Common errors" href="/troubleshooting/common-errors">
+    Remapping-related errors and how to fix them.
+  </Card>
+</CardGroup>

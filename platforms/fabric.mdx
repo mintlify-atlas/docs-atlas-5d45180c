@@ -1,0 +1,174 @@
+---
+title: "Running Arclight on Fabric mod loader 1.21.1"
+description: "Set up an Arclight server on Fabric to load Bukkit plugins and Fabric mods together, with lighter overhead than Forge-based platforms."
+---
+
+Fabric is a lightweight, modular mod loader focused on fast updates to new Minecraft releases and a minimal runtime footprint. The Arclight Fabric distribution lets you run Bukkit/Spigot plugins on a Fabric server, giving you access to the Fabric mod ecosystem while keeping full compatibility with your existing plugin stack. Compared to the Forge and NeoForge builds, Fabric generally has a smaller memory overhead and follows Minecraft releases more quickly.
+
+## Prerequisites
+
+Before you start, make sure you have:
+
+- **Java 21** or later installed
+- The Arclight Fabric JAR downloaded from the releases page
+- At least 4 GB of RAM allocated
+
+<Warning>
+  Arclight requires Java 21. Older JDK versions will fail to launch.
+</Warning>
+
+## Downloading the JAR
+
+The Fabric distribution is packaged as a single self-contained launcher JAR named after the Minecraft version it targets:
+
+```
+arclight-fabric-1.21.1.jar
+```
+
+This JAR bootstraps Fabric loader **0.18.2** and downloads Fabric API **0.116.7+1.21.1** on first run. You do not need to install Fabric separately.
+
+## Starting the server
+
+<Steps>
+  <Step title="Accept the EULA">
+    Create a file named `eula.txt` in your server directory with the following content, or let the server generate it and then edit it:
+
+    ```text eula.txt
+    eula=true
+    ```
+  </Step>
+  <Step title="Run the JAR">
+    Launch the server with the `nogui` flag:
+
+    ```bash
+    java -Xms2G -Xmx4G -jar arclight-fabric-1.21.1.jar nogui
+    ```
+
+    On first run Arclight downloads Fabric loader libraries and Minecraft itself. This can take several minutes depending on your connection.
+  </Step>
+  <Step title="Wait for setup to complete">
+    Once the initial download finishes, the server starts normally. You will see Fabric loading mods in the log, followed by CraftBukkit and your plugins initialising.
+  </Step>
+</Steps>
+
+<Tip>
+  For JVM tuning options, see [JVM flags](/configuration/jvm-flags).
+</Tip>
+
+## Directory layout
+
+After the first run your server directory will look like this:
+
+```
+server/
+├── arclight-fabric-1.21.1.jar   # The launcher JAR
+├── eula.txt
+├── server.properties
+├── arclight.conf                 # Arclight-specific configuration
+├── mods/                         # Fabric mods go here
+├── plugins/                      # Bukkit/Spigot plugins go here
+├── world/
+└── libraries/                    # Downloaded Fabric libraries (auto-managed)
+```
+
+<Info>
+  Fabric mods belong in `mods/`. Bukkit plugins belong in `plugins/`. Do not mix the two.
+</Info>
+
+## Fabric API requirement
+
+The Fabric build depends on **Fabric API** at runtime. The installer downloads the correct version automatically; you do not need to add Fabric API to `mods/` yourself. If you add other mods that also list Fabric API as a dependency, they will use the copy already provided by Arclight's bootstrap.
+
+In addition, the installer includes `fabric-permissions-api` (`>=0.3`), which enables Fabric mods to query Bukkit-style permissions through a unified API.
+
+## Terminal console support
+
+Unlike the Forge and NeoForge builds, the Fabric distribution ships with **TerminalConsoleAppender** (`net.minecrell:terminalconsoleappender:1.2.0`) and the full jline terminal stack (`jline-terminal`, `jline-reader`, `jansi`). This provides a proper interactive console with tab-completion and colour support without relying on Forge's own console infrastructure.
+
+<Note>
+  If you are running the server inside a Docker container or another environment where ANSI escape codes are not supported, pass `-Dterminal.ansi=false` to suppress colour output.
+</Note>
+
+## How Arclight integrates with Fabric
+
+On the Fabric platform, Arclight registers itself via the `fabric.mod.json` entrypoint system rather than a `@Mod` annotation. The `main` entrypoint (`ArclightModEntrypoint`) initialises the CraftBukkit layer and registers Fabric event callbacks:
+
+```java
+// Excerpt from ArclightModEntrypoint.java
+public class ArclightModEntrypoint implements ModInitializer {
+    @Override
+    public void onInitialize() {
+        Arclight.setServer(new FabricArclightServer());
+        EventHandlerRegistry.register();
+        ArclightPermissionImpl.init();
+    }
+}
+```
+
+```json fabric.mod.json
+{
+  "id": "arclight",
+  "environment": "server",
+  "depends": {
+    "fabricloader": ">=0.16",
+    "fabric-permissions-api-v0": ">=0.3"
+  },
+  "entrypoints": {
+    "main": ["io.izzel.arclight.fabric.ArclightModEntrypoint"],
+    "arclight_boot": ["io.izzel.arclight.fabric.boot.FabricBootstrap"]
+  }
+}
+```
+
+## Intermediary mappings
+
+Fabric uses **intermediary** mappings as its stable obfuscation layer, whereas Forge and NeoForge use SRG/MojMap names. Arclight generates a dedicated `bukkit-to-fabric` mapping set at build time, so that Bukkit's class and method names resolve correctly against Fabric's intermediary names at runtime. This means that Forge mod JARs cannot be placed in the `mods/` folder of a Fabric server — they are built against an incompatible mapping convention.
+
+<Warning>
+  Forge and NeoForge mods are not compatible with Fabric. Only mods distributed as Fabric JARs (with a `fabric.mod.json`) will load correctly.
+</Warning>
+
+## Comparing all three platforms
+
+<CodeGroup>
+
+```bash Forge
+java -Xms2G -Xmx4G -jar arclight-forge-1.21.1.jar nogui
+```
+
+```bash NeoForge
+java -Xms2G -Xmx4G -jar arclight-neoforge-1.21.1.jar nogui
+```
+
+```bash Fabric
+java -Xms2G -Xmx4G -jar arclight-fabric-1.21.1.jar nogui
+```
+
+</CodeGroup>
+
+All three JARs accept the same `nogui` argument and the same JVM flags. Choose the platform that matches the mod ecosystem you want to use.
+
+## Fabric mod compatibility
+
+Arclight does not interfere with Fabric's mod loading pipeline. Mods that replace core world and entity logic through Fabric's mixin system may conflict with Arclight's own mixins. See the [mod compatibility](/compatibility/mods) page for guidance.
+
+## Configuration
+
+Arclight's own settings live in `arclight.conf`. Plugin configuration files are written to `plugins/<plugin-name>/` as usual. For the full list of settings see [Arclight configuration](/configuration/arclight-config).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Forge platform" icon="code" href="/platforms/forge">
+    Use the original Minecraft Forge loader instead.
+  </Card>
+  <Card title="NeoForge platform" icon="code" href="/platforms/neoforge">
+    Use the NeoForge community fork.
+  </Card>
+  <Card title="Plugin compatibility" icon="puzzle" href="/compatibility/plugins">
+    Check which Bukkit plugins are known to work with Arclight.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting/common-errors">
+    Diagnose startup errors and common runtime issues.
+  </Card>
+</CardGroup>

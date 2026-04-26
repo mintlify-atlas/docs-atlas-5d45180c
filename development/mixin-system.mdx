@@ -1,0 +1,201 @@
+---
+title: "Arclight's mixin-based server patching"
+description: "How Arclight uses SpongePowered Mixin to inject CraftBukkit server logic into Minecraft classes at runtime without maintaining a server fork."
+---
+
+Arclight does not maintain a fork of CraftBukkit's patched Minecraft sources. Instead, it applies every change at runtime through [SpongePowered Mixin](https://github.com/SpongePowered/Mixin) — a bytecode-weaving framework that merges mixin classes into their targets before those targets are first used. This page explains the four mixin configuration sets, how the plugin and connector classes orchestrate them, and what patterns like `bridge$` methods mean in practice.
+
+## What Mixin does
+
+Mixin works by reading specially annotated classes (called _mixins_) and merging their members into a designated _target_ class at load time. An `@Inject` annotation, for example, inserts code at a chosen point in an existing method without replacing it. An `@Overwrite` replaces a method entirely. Because the merging happens in the JVM's class-loading phase, Arclight's Bukkit additions become an indistinguishable part of the Minecraft classes — no reflection, no proxies at runtime.
+
+Arclight declares all its mixin classes in four JSON configuration files bundled in `arclight-common`. All four use `ArclightMixinPlugin` as their Mixin plugin, giving Arclight a hook to conditionally skip mixins and to post-process the merged bytecode.
+
+## `ArclightConnector`: the entry point
+
+`ArclightConnector` implements Mixin's `IMixinConnector` interface. The mod JAR manifest declares it as the connector:
+
+```
+MixinConnector: io.izzel.arclight.common.mod.ArclightConnector
+```
+
+When Mixin initialises it calls `ArclightConnector.connect()`, which registers every configuration before any game code runs:
+
+```java
+public void connect() {
+    MixinTools.setup();
+    Mixins.addConfiguration("mixins.arclight.core.json");
+    Mixins.addConfiguration("mixins.arclight.bukkit.json");
+    switch (ArclightPlatform.current()) {
+        case VANILLA  -> Mixins.addConfiguration("mixins.arclight.vanilla.json");
+        case FORGE    -> Mixins.addConfiguration("mixins.arclight.forge.json");
+        case NEOFORGE -> Mixins.addConfiguration("mixins.arclight.neoforge.json");
+    }
+    Mixins.addConfiguration("mixins.arclight.impl.optimization.json");
+}
+```
+
+Platform-specific configs (`mixins.arclight.forge.json`, `mixins.arclight.neoforge.json`) live in their respective platform modules. The four configs registered here are all in `arclight-common`.
+
+## `ArclightMixinPlugin`: conditional application and post-processing
+
+Every configuration file names `ArclightMixinPlugin` as its plugin:
+
+```json
+"plugin": "io.izzel.arclight.common.mod.ArclightMixinPlugin"
+```
+
+`ArclightMixinPlugin` implements `IMixinConfigPlugin` and does two things:
+
+**Conditional application.** `shouldApplyMixin` delegates to `ShouldApplyProcessor.shouldApply(mixinClassName)`, which can disable individual mixins based on configuration flags or detected environment conditions.
+
+**Post-processing.** After Mixin has merged a class, `postApply` runs a chain of `MixinProcessor` transformers over the resulting bytecode:
+
+```java
+private final List<MixinProcessor> postProcessors = List.of(
+    new RenameIntoProcessor(),
+    new TransformAccessProcessor(),
+    new CreateConstructorProcessor(),
+    new InlineMethodProcessor(),
+    new InlineFieldProcessor(),
+    new InvokeSpecialProcessor()
+);
+```
+
+These processors handle Arclight-specific patterns that vanilla Mixin annotations cannot express — for example, inlining a bridge field directly into the target class or adjusting constructor visibility for the `bridge$` pattern.
+
+## The four mixin configuration sets
+
+### `mixins.arclight.core.json` — core Bukkit server logic
+
+<Info>
+  This is the largest configuration, with over 500 mixin classes targeting both Minecraft server internals and vanilla game logic.
+</Info>
+
+- **Package:** `io.izzel.arclight.common.mixin.core`
+- **Required:** yes
+- **Mixin priority:** 500 (lower runs earlier; this fires before the vanilla config)
+- **Compatibility level:** Java 21
+
+This set contains the bulk of Arclight's Bukkit event wiring. It injects into:
+
+- Minecraft server infrastructure: `MinecraftServerMixin`, `DedicatedServerMixin`, `ServerLevelMixin`, `ServerPlayerMixin`, `PlayerListMixin`
+- Every entity type (animals, monsters, projectiles, vehicles, bosses)
+- Every block and block entity
+- Inventories, crafting, furnaces, and other containers
+- Network packet handlers
+- World generation and structure placement
+- Loot tables, game rules, raids, advancements, and scoreboards
+
+The injectors section is configured with `maxShiftBy: 2` to accommodate injection points that need to shift further in the bytecode, and `defaultRequire: 1` so missing injection targets are hard errors rather than silent failures.
+
+```json
+{
+  "required": true,
+  "package": "io.izzel.arclight.common.mixin.core",
+  "plugin": "io.izzel.arclight.common.mod.ArclightMixinPlugin",
+  "mixinPriority": 500,
+  "compatibilityLevel": "JAVA_21",
+  "injectors": { "maxShiftBy": 2, "defaultRequire": 1 },
+  "mixins": [ "server.MinecraftServerMixin", "..." ]
+}
+```
+
+### `mixins.arclight.bukkit.json` — CraftBukkit implementations
+
+- **Package:** `io.izzel.arclight.common.mixin.bukkit`
+- **Required:** yes
+
+This set patches the CraftBukkit implementation classes that ship as part of Arclight (the `org.bukkit.craftbukkit.v` package). Unlike the `core` set, which injects into Minecraft internals, these mixins complete or fix the CraftBukkit layer itself. Key targets include:
+
+- `CraftServerMixin`, `CraftWorldMixin`, `CraftPlayerMixin`, `CraftEntityMixin`
+- `CraftItemStackMixin`, `CraftInventoryMixin`
+- `CraftEventFactoryMixin`, `EntityDamageEventMixin`
+- `PluginClassLoaderMixin`, `JavaPluginLoaderMixin`, `LibraryLoaderMixin`
+- `CraftSchedulerMixin`, `WatchdogThreadMixin`
+
+The `PluginClassLoaderMixin` and `JavaPluginLoaderMixin` are particularly important: they integrate the runtime remapper so that every plugin class loaded through CraftBukkit's class loader is first processed by `ArclightRemapper`.
+
+### `mixins.arclight.vanilla.json` — vanilla-only patches
+
+- **Package:** `io.izzel.arclight.common.mixin.vanilla`
+- **Required:** yes
+- **Mixin priority:** 555 (higher than core; runs after it)
+
+These mixins are applied only when the platform is `VANILLA` (that is, a plain Minecraft server without Forge or Fabric). They cover areas where Forge and Fabric already provide the necessary hooks, so duplicating the patch would cause conflicts:
+
+```json
+{
+  "mixins": [
+    "server.dedicated.DedicatedServerMixin_Vanilla",
+    "world.entity.EntityMixin_Vanilla",
+    "world.entity.LivingEntityMixin_Vanilla",
+    "world.level.LevelMixin_Vanilla",
+    "..."
+  ]
+}
+```
+
+The `_Vanilla` suffix in the class name is a naming convention that identifies this set visually in stack traces.
+
+### `mixins.arclight.impl.optimization.json` — performance optimisations
+
+- **Package:** `io.izzel.arclight.common.mixin.optimization.general`
+- **Required:** yes
+
+This set ports several well-known optimisation patches from Paper/Spigot into the mixin system. The optimisations are grouped into sub-packages:
+
+| Sub-package | What it does |
+|---|---|
+| `activationrange` | Throttles AI ticks for distant entities (activation range) |
+| `chunkload` | Prevents sleeping in bed from loading unnecessary chunks |
+| `network` | Reduces packet overhead in `ChunkMap` and packet listener |
+| `realtime` | Adjusts item entity and game mode timers to wall-clock time |
+| `trackingrange` | Per-category entity tracking range instead of a global value |
+
+General optimisations include `GoalMixin` (skips redundant goal evaluations), `ShapesMixin` (caches VoxelShape calculations), and `EntityMixin_Optimize` / `MobMixin_Optimization` (reduces entity update overhead).
+
+## Access widening
+
+Minecraft uses `private` and package-private access heavily. Arclight ships an access widener file (`arclight.accesswidener`) that declares which fields and methods need to be opened up for Mixin's `@Accessor` and `@Invoker` patterns to work. The widener path is set in the root `build.gradle`:
+
+```groovy
+loom {
+    accessWidenerPath = getRootProject().ext.commonProject.loom.accessWidenerPath
+}
+```
+
+The mapping files `bukkit.at` (access transformers for Forge) and `extra_mapping.tsrg` (extra name mappings) serve a similar purpose on the Forge side.
+
+## The `bridge$` interface pattern
+
+Arclight needs to store Bukkit state on Minecraft objects — for example a `CraftEntity` reference on a `net.minecraft.world.entity.Entity`. It cannot add fields directly through Mixin (that would break binary compatibility). Instead it uses _bridge interfaces_:
+
+1. An interface (for example `MinecraftServerBridge`) declares `bridge$`-prefixed methods like `bridge$setServer` and `bridge$getServer`.
+2. A mixin on the target class (`MinecraftServerMixin`) implements the interface and backs the methods with a `@Shadow`-ed or `@Unique` field.
+3. Call sites cast the target to the bridge interface: `((MinecraftServerBridge) console).bridge$setServer(server)`.
+
+This pattern is used throughout `arclight-common`. The `bridge$` prefix signals that the method is not part of any public Bukkit API and is purely an internal plumbing mechanism.
+
+## Mixin conflict warnings
+
+<Warning>
+  Arclight's mixins target the same Minecraft classes that performance mods such as Lithium, Sodium (server-side modules), and other Bukkit-compatibility layers target. If two mixins both use `@Overwrite` on the same method, only one can win, and the other silently loses its changes. Always check the server log at startup — Mixin prints a warning when a conflict is detected. Report unresolvable conflicts on the [Arclight issue tracker](https://github.com/IzzelAliz/Arclight/issues).
+</Warning>
+
+If you are writing your own mod and it conflicts with Arclight, the recommended resolution is:
+
+1. Use `@Inject` with a unique injection point rather than `@Overwrite`.
+2. Set your mixin priority above 500 (Arclight's core priority) if you need to run after Arclight, or below it to run before.
+3. Use `@ModifyVariable` or `@ModifyArg` instead of rewriting entire methods.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Architecture overview" href="/development/architecture">
+    How the modules, bootstrap, and Bukkit server fit together.
+  </Card>
+  <Card title="Runtime remapper" href="/development/remapper">
+    How plugin classes are translated from CraftBukkit NMS names to Mojang names.
+  </Card>
+</CardGroup>

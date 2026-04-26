@@ -1,0 +1,105 @@
+---
+title: "Contribute to Arclight: bugs, patches, and pull requests"
+description: "Learn how to set up a dev environment, understand the project layout, file bug reports, and submit pull requests to the Arclight repository."
+---
+
+Arclight is open source software licensed under [GPL v3](https://github.com/IzzelAliz/Arclight/blob/main/LICENSE). Contributions of all kinds are welcome — bug fixes, platform improvements, documentation corrections, and new features. This page walks you through everything you need to get started.
+
+## Set up the development environment
+
+Contributing to Arclight starts with building it locally. Follow the steps in [Build Arclight from source](/development/building) to clone the repository, satisfy the JDK 21 prerequisite, and verify that `./gradlew collect` completes successfully on your machine before making any changes.
+
+## Project structure
+
+The repository is organised into a set of Gradle subprojects. Understanding which module owns which concern will help you find the right place to make a change.
+
+<CardGroup cols={2}>
+  <Card title="arclight-common" icon="layers">
+    Shared Mixin implementations, Bukkit-to-Forge/Fabric bridging code, and the access transformer (`bukkit.at`). Most gameplay behaviour patches live here.
+  </Card>
+  <Card title="arclight-forge" icon="hammer">
+    Forge-specific platform code. Contains Forge event hooks, loader integration, and any Forge-only Mixin targets.
+  </Card>
+  <Card title="arclight-neoforge" icon="hammer">
+    NeoForge-specific platform code, mirroring the structure of `arclight-forge` for the NeoForge loader.
+  </Card>
+  <Card title="arclight-fabric" icon="puzzle">
+    Fabric-specific platform code, including Fabric API integration and Fabric loader hooks.
+  </Card>
+  <Card title="bootstrap" icon="package">
+    The launcher and installer. Produces the final single-file distributable JARs via the `forgeJar`, `neoforgeJar`, and `fabricJar` tasks. Also hosts the `runProd*` development server tasks.
+  </Card>
+  <Card title="installer" icon="download">
+    Installer tooling that resolves and downloads mod loader artifacts at first launch.
+  </Card>
+  <Card title="i18n-config" icon="globe">
+    Configuration schemas and localisation resources bundled into every JAR.
+  </Card>
+  <Card title="buildSrc" icon="wrench">
+    Internal Gradle build plugins, including `ArclightGradlePlugin`, which drives Spigot remapping, access-widener generation, and other build-time code generation tasks.
+  </Card>
+</CardGroup>
+
+<Note>
+  Arclight uses the [Architectury](https://docs.architectury.dev/) framework to share code across Forge, NeoForge, and Fabric. If you are writing cross-platform logic, place it in `arclight-common` and implement any loader-specific wiring in the appropriate platform module.
+</Note>
+
+## File a bug report
+
+Before opening an issue, search [existing issues](https://github.com/IzzelAliz/Arclight/issues) to check whether the problem has already been reported.
+
+When you open a new issue, include:
+
+- **Platform and version** — which JAR you are using (e.g., `arclight-forge-1.21.1-1.0.2-SNAPSHOT-a1b2c3d.jar`).
+- **Minecraft version** — confirm it matches the JAR's embedded MC version.
+- **Full server log** — paste the complete `logs/latest.log`, not just the error line. Mixin crashes in particular require the full stack trace to diagnose.
+- **Reproduction steps** — a minimal list of steps that reliably triggers the bug.
+- **Mod and plugin list** — attach your `mods/` and `plugins/` folder listing so conflicts can be ruled out.
+
+<Tip>
+  If the issue only appears with a specific plugin or mod, try to reproduce it in isolation first. This drastically speeds up triage.
+</Tip>
+
+## Submit a pull request
+
+<Steps>
+  <Step title="Fork the repository">
+    Click **Fork** on the [Arclight GitHub page](https://github.com/IzzelAliz/Arclight) to create your own copy of the repository.
+  </Step>
+  <Step title="Create a feature branch">
+    Branch off `main` with a short descriptive name:
+
+    ```bash
+    git checkout -b fix/plugin-event-priority
+    ```
+  </Step>
+  <Step title="Make your changes">
+    Edit the relevant subproject. If your change touches Bukkit bridging logic shared by all platforms, work in `arclight-common/`. Platform-specific fixes belong in the corresponding `arclight-<platform>/` module.
+  </Step>
+  <Step title="Test with runProd tasks">
+    Launch a local development server against your changes before submitting. See [Build Arclight from source](/development/building) for the available `runProd*` tasks:
+
+    ```bash
+    ./gradlew :bootstrap:runProdForge
+    ```
+
+    Verify the server starts cleanly and that your change behaves as expected. If your fix targets multiple platforms, test each one.
+  </Step>
+  <Step title="Open the pull request">
+    Push your branch to your fork and open a pull request against the `main` branch of `IzzelAliz/Arclight`. In the description, explain what the change does and why, and link to the related issue if one exists.
+
+    The CI workflow (`pr.yml`) will automatically run `./gradlew cleanBuild build collect` against your branch. The PR must pass this check before it can be merged.
+  </Step>
+</Steps>
+
+## Code of conduct
+
+Arclight follows the [No Code of Conduct](https://github.com/domgetter/NCoC) policy: contributions from anyone are accepted, and no additional social rules are imposed beyond treating others as adults. The full text is in [`CODE_OF_CONDUCT.md`](https://github.com/IzzelAliz/Arclight/blob/main/CODE_OF_CONDUCT.md) in the repository root.
+
+## Get help
+
+If you have questions about a specific change or want to discuss an approach before writing code, the Arclight Discord server is the best place to reach the development team:
+
+**Discord:** [https://discord.gg/ZvTY5SC](https://discord.gg/ZvTY5SC)
+
+You can also use [GitHub Discussions](https://github.com/IzzelAliz/Arclight/discussions) for longer-form design questions.

@@ -1,0 +1,155 @@
+---
+title: "Running Arclight on NeoForge for Minecraft 1.21.1"
+description: "Set up an Arclight server on NeoForge to load Bukkit plugins and NeoForge mods together on a single server instance using Java 21."
+---
+
+NeoForge is a community-maintained fork of Minecraft Forge that diverged in 2023 with the goal of faster development cycles and a modernised API surface. Arclight provides a dedicated NeoForge distribution that uses NeoForge's own event bus and mapping pipeline, keeping it separate from the Forge build so that each platform can track its upstream independently.
+
+## Prerequisites
+
+Before you start, make sure you have:
+
+- **Java 21** or later installed
+- The Arclight NeoForge JAR downloaded from the releases page
+- At least 4 GB of RAM allocated (8 GB recommended for mod-heavy servers)
+
+<Warning>
+  Arclight requires Java 21. Older JDK versions will fail to launch.
+</Warning>
+
+## Downloading the JAR
+
+The NeoForge distribution is packaged as a single self-contained launcher JAR named after the Minecraft version it targets:
+
+```
+arclight-neoforge-1.21.1.jar
+```
+
+This JAR bundles the NeoForge installer bootstrap and downloads NeoForge **21.1.216** on first run. You do not need to install NeoForge separately.
+
+## Starting the server
+
+<Steps>
+  <Step title="Accept the EULA">
+    Create a file named `eula.txt` in your server directory with the following content, or let the server generate it and then edit it:
+
+    ```text eula.txt
+    eula=true
+    ```
+  </Step>
+  <Step title="Run the JAR">
+    Launch the server with the `nogui` flag to disable the Swing console window:
+
+    ```bash
+    java -Xms2G -Xmx4G -jar arclight-neoforge-1.21.1.jar nogui
+    ```
+
+    On first run Arclight downloads NeoForge libraries and Minecraft itself. This can take several minutes depending on your connection.
+  </Step>
+  <Step title="Wait for setup to complete">
+    Once the initial download finishes, the server starts normally. You will see NeoForge loading mods in the log, followed by CraftBukkit and your plugins initialising.
+  </Step>
+</Steps>
+
+<Tip>
+  For JVM tuning options that improve performance on modded servers, see [JVM flags](/configuration/jvm-flags).
+</Tip>
+
+## Directory layout
+
+After the first run your server directory will look like this:
+
+```
+server/
+├── arclight-neoforge-1.21.1.jar   # The launcher JAR
+├── eula.txt
+├── server.properties
+├── arclight.conf                   # Arclight-specific configuration
+├── mods/                           # NeoForge mods go here
+├── plugins/                        # Bukkit/Spigot plugins go here
+├── world/
+└── libraries/                      # Downloaded NeoForge libraries (auto-managed)
+```
+
+<Info>
+  NeoForge mods belong in `mods/`. Bukkit plugins belong in `plugins/`. Never put a plugin JAR in `mods/` or a NeoForge mod JAR in `plugins/`.
+</Info>
+
+## How Arclight integrates with NeoForge
+
+Like the Forge build, the NeoForge distribution registers itself as a mod with the ID `arclight` using the `@Mod("arclight")` annotation (this time against `net.neoforged.fml.common.Mod`). On startup it registers event dispatchers against `NeoForge.EVENT_BUS`, translating NeoForge events such as block break, block place, entity interactions, and item drops into their Bukkit equivalents:
+
+```java
+// Excerpt from arclight-neoforge ArclightMod.java
+@Mod("arclight")
+public class ArclightMod {
+    public ArclightMod() {
+        Arclight.setServer(new NeoForgeArclightServer());
+        ArclightEventDispatcherRegistry.registerAllEventDispatchers();
+    }
+}
+```
+
+The mod descriptor for NeoForge is `META-INF/neoforge.mods.toml` rather than `mods.toml`, and the loader version constraint is `[2,)` — any NeoForge FML loader version 2 or later.
+
+## Differences from the Forge build
+
+<CardGroup cols={2}>
+  <Card title="Separate mod descriptor" icon="file">
+    NeoForge uses `neoforge.mods.toml` instead of `mods.toml`. The two formats are similar but not identical.
+  </Card>
+  <Card title="Dedicated mappings" icon="map">
+    The NeoForge build generates `bukkit-to-neoforge` mappings independently. These are distinct from the Forge SRG mappings, so you cannot mix mod JARs built against one platform's mappings into the other's `mods/` folder.
+  </Card>
+  <Card title="NeoForge event bus" icon="zap">
+    Event dispatchers are registered against `NeoForge.EVENT_BUS` rather than the Forge `MinecraftForge.EVENT_BUS`. Mods written for Forge that use the Forge event bus directly will need to be rebuilt against NeoForge to run here.
+  </Card>
+  <Card title="Access widener" icon="unlock">
+    The NeoForge build uses an access widener file (`arclight_neoforge.accesswidener`) in addition to the access transformer, reflecting NeoForge's hybrid approach to access widening.
+  </Card>
+</CardGroup>
+
+## Comparing Forge and NeoForge distributions
+
+<CodeGroup>
+
+```bash Forge
+java -Xms2G -Xmx4G -jar arclight-forge-1.21.1.jar nogui
+```
+
+```bash NeoForge
+java -Xms2G -Xmx4G -jar arclight-neoforge-1.21.1.jar nogui
+```
+
+</CodeGroup>
+
+Both JARs accept the same `nogui` argument and the same JVM flags. Choose the one that matches the ecosystem of mods you want to run.
+
+## NeoForge mod compatibility
+
+NeoForge mods are loaded by the NeoForge mod loader in the standard way. Arclight does not interfere with the mod loading pipeline. Mods that replace core world and entity logic may conflict with Arclight's mixins. See the [mod compatibility](/compatibility/mods) page for details.
+
+<Warning>
+  Forge mods and NeoForge mods are not interchangeable. A JAR built for Forge will not load on NeoForge, and vice versa.
+</Warning>
+
+## Configuration
+
+Arclight's own settings live in `arclight.conf`. Plugin configuration files are written to `plugins/<plugin-name>/` as usual. For the full list of settings see [Arclight configuration](/configuration/arclight-config).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Forge platform" icon="code" href="/platforms/forge">
+    Use the original Minecraft Forge loader instead.
+  </Card>
+  <Card title="Fabric platform" icon="layers" href="/platforms/fabric">
+    Try the lighter-weight Fabric distribution.
+  </Card>
+  <Card title="Plugin compatibility" icon="puzzle" href="/compatibility/plugins">
+    Check which Bukkit plugins are known to work with Arclight.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting/common-errors">
+    Diagnose startup errors and common runtime issues.
+  </Card>
+</CardGroup>

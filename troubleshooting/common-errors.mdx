@@ -1,0 +1,261 @@
+---
+title: "Fix common Arclight server errors"
+description: "Diagnose and resolve the most frequent errors seen when running an Arclight server, from startup failures to plugin class conflicts and mixin crashes."
+---
+
+Most Arclight errors fall into a small number of categories. Work through the accordion below that matches what you see in your logs, then follow the recommended fix. If the problem persists after following these steps, see [how to report bugs](/troubleshooting/faq#where-do-i-report-bugs) or open an issue on GitHub.
+
+<AccordionGroup>
+
+  <Accordion title="Server fails to start — 'Error initializing Arclight'">
+    **What you see**
+
+    ```
+    RuntimeException: Error initializing Arclight
+    ```
+
+    This exception is thrown from `ArclightServer.createOrLoad` when the `CraftServer` constructor or JDBC driver registration fails during startup.
+
+    **Likely causes**
+
+    - Java version is too old. Arclight requires Java 21 or later.
+    - Required mod dependencies are missing from the `mods/` folder.
+    - The Arclight JAR is corrupted or was downloaded incompletely.
+
+    **Steps to fix**
+
+    <Steps>
+      <Step title="Verify your Java version">
+        Run `java --version` in your terminal. The output must show version 21 or higher:
+
+        ```
+        openjdk 21.0.5 2024-10-15 LTS
+        OpenJDK Runtime Environment Temurin-21.0.5+11 (build 21.0.5+11-LTS)
+        ```
+
+        If you see version 17 or lower, install a Java 21 JDK (for example, Eclipse Temurin) and point your start script at it.
+      </Step>
+      <Step title="Check for missing mod dependencies">
+        Read the full stack trace above the `Error initializing Arclight` line. If a mod dependency is absent, you will typically see a `ClassNotFoundException` or a mod loader error naming the missing mod. Place the required mod JARs in your `mods/` folder and restart.
+      </Step>
+      <Step title="Re-download the JAR">
+        Download a fresh copy of the Arclight JAR from the official release page and replace the existing file. Verify the file size matches the published release.
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="Plugin fails to load — ClassNotFoundException or NoSuchMethodError">
+    **What you see**
+
+    ```
+    java.lang.ClassNotFoundException: net.minecraft.server.v1_XX_RX.SomeClass
+    java.lang.NoSuchMethodError: org.bukkit.craftbukkit.v1_XX_RX.CraftWorld.someMethod
+    ```
+
+    Arclight remaps CraftBukkit and NMS class names at runtime using SpecialSource. If a plugin hard-codes internal class names or method signatures that do not match the remapped names Arclight produces, the load fails.
+
+    **Likely causes**
+
+    - The plugin targets a different Minecraft version than your server.
+    - The plugin uses CraftBukkit or NMS internals directly instead of the public Bukkit API.
+    - A remapping gap — the runtime remapper does not cover every internal class.
+
+    **Steps to fix**
+
+    <Steps>
+      <Step title="Confirm plugin compatibility">
+        Check the plugin's documentation or release page for supported Minecraft versions. Using a plugin built for 1.20 on a 1.21 server, or vice versa, will produce this error. Update or replace the plugin.
+      </Step>
+      <Step title="Enable the remapper dump flag">
+        Add the following JVM system property to your start command to write remapped plugin class files to disk for inspection:
+
+        ```bash
+        -Darclight.remapper.dump=./.mixin.out/plugin_classes
+        ```
+
+        After restarting, the remapped bytecode appears in `.mixin.out/plugin_classes/`. You can decompile these files to verify which class names the remapper produced.
+      </Step>
+      <Step title="Report or replace the plugin">
+        If the plugin is open-source, report the incompatibility to the plugin author with the remapper dump output. As a short-term workaround, look for an alternative plugin that uses only the public Bukkit API.
+      </Step>
+    </Steps>
+
+    <Tip>
+      Most plugins that rely solely on the public Bukkit or Spigot API load without issues. Problems almost always stem from direct NMS or CraftBukkit access. See [plugin compatibility](/compatibility/plugins) for more details.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Mixin conflict — MixinApplyError or mixin crash on startup">
+    **What you see**
+
+    ```
+    MixinApplyError: Mixin [some.mod.mixin.SomeMixin] from phase [DEFAULT] in config [somemod.mixins.json]
+      failed during APPLY
+    ```
+
+    Arclight applies its own mixins to Minecraft classes to bridge the Bukkit layer. If another mod's mixin targets the same class and makes incompatible changes (for example, removing a field that Arclight's mixin reads), the combined application fails.
+
+    **Likely causes**
+
+    - A mod mixin and an Arclight mixin both modify the same target class in ways that cannot be merged.
+    - The conflicting mod was designed for a slightly different Minecraft build.
+
+    **Steps to fix**
+
+    <Steps>
+      <Step title="Enable mixin debug export">
+        Add these JVM system properties to your start command:
+
+        ```bash
+        -Dmixin.debug.export=true
+        -Dmixin.dumpTargetOnFailure=true
+        ```
+
+        Restart the server. Mixin writes the post-transform bytecode of the failing class to `.mixin.out/` so you can inspect exactly what was applied and where the conflict occurred.
+      </Step>
+      <Step title="Identify the conflicting mod">
+        The `MixinApplyError` stack trace names the mixin class (e.g., `somemod.mixin.SomeMixin`) and the target class. Cross-reference the mixin package with the mod responsible for it.
+      </Step>
+      <Step title="Report the conflict">
+        Report the conflict to the Arclight issue tracker at [IzzelAliz/Arclight](https://github.com/IzzelAliz/Arclight) and include: the Arclight version, the conflicting mod name and version, Minecraft version, and the `.mixin.out/` dump. Also consider reporting it to the mod author so they can make their mixin compatible with Arclight's changes.
+      </Step>
+    </Steps>
+
+    <Note>
+      For background on how Arclight's mixin system works and how post-processors transform class nodes, see [the mixin system overview](/development/mixin-system).
+    </Note>
+  </Accordion>
+
+  <Accordion title="Server hangs or deadlocks after startup">
+    **What you see**
+
+    The server starts, loads plugins and mods, but then stops responding to commands and player connections. No further log output appears or the log repeatedly prints the same line.
+
+    **Likely causes**
+
+    - A plugin is calling Bukkit API methods (such as entity manipulation, world access, or scheduler tasks) from a non-main thread.
+    - A blocking call on the main thread is waiting for a result from an async thread that is itself waiting for the main thread — a classic deadlock.
+    - Arclight's async catcher detects the violation and throws, leaving a thread suspended.
+
+    **Steps to fix**
+
+    <Steps>
+      <Step title="Look for async catcher warnings in the log">
+        Search your `logs/latest.log` for lines containing `Asynchronous` or `async` near the hang point. Arclight includes an async catcher (configured per platform via `async_catcher.json`) that logs the offending call site.
+      </Step>
+      <Step title="Generate a thread dump">
+        While the server is hung, run:
+
+        ```bash
+        kill -3 <server-pid>
+        ```
+
+        On Windows, use a tool such as jstack: `jstack <server-pid>`. The thread dump shows which threads are blocked and on what monitor.
+      </Step>
+      <Step title="Move main-thread work to the scheduler">
+        Any Bukkit API call that must run on the main thread should be dispatched through the scheduler:
+
+        ```java
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            // main-thread-safe code here
+        });
+        ```
+
+        Report the hang to the plugin author if the plugin is not yours.
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="'registry.error' in logs">
+    **What you see**
+
+    ```
+    [Arclight] registry.error
+    ```
+
+    This is logged by `ArclightServer.createOrLoad` when `BukkitRegistry.registerAll` or `SpigotConfig.init` throws an exception during Bukkit registry initialization.
+
+    **Likely causes**
+
+    - The Minecraft version of your Arclight JAR does not match the version expected by the mod loader or your mods.
+    - A required `spigot.yml` entry is malformed.
+    - A mod changed a registry entry in an incompatible way.
+
+    **Steps to fix**
+
+    <Steps>
+      <Step title="Match JAR version to your setup">
+        Confirm the Arclight JAR you downloaded matches your target Minecraft version. The JAR file name encodes the version, for example `arclight-forge-1.21.1-1.0.0.jar`. Do not mix, for instance, a 1.20.1 JAR with 1.21 mods.
+      </Step>
+      <Step title="Check the full exception below the log line">
+        The `registry.error` log entry is always accompanied by a full stack trace. Read the cause exception — it normally points directly to which registry or config entry triggered the failure.
+      </Step>
+      <Step title="Validate spigot.yml">
+        If the stack trace leads into `SpigotConfig.init`, open `spigot.yml` and look for syntax errors or entries that reference invalid values. Deleting `spigot.yml` allows Arclight to regenerate it with defaults on the next start.
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="EULA not accepted — server exits immediately">
+    **What you see**
+
+    The server prints a message about the EULA and shuts down without loading any mods or plugins.
+
+    **Likely cause**
+
+    Mojang requires you to accept the Minecraft End User License Agreement before running a server. Arclight, like all Minecraft server implementations, enforces this.
+
+    **Fix**
+
+    Open `eula.txt` in your server directory and change:
+
+    ```properties
+    eula=false
+    ```
+
+    to:
+
+    ```properties
+    eula=true
+    ```
+
+    Save the file and restart the server. If `eula.txt` does not exist, start the server once — it will create the file and then exit. Edit the generated file and start again.
+
+    <Warning>
+      By setting `eula=true` you agree to Mojang's [Minecraft End User License Agreement](https://aka.ms/MinecraftEULA). Read it before proceeding.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="OutOfMemoryError — server crashes under load">
+    **What you see**
+
+    ```
+    java.lang.OutOfMemoryError: Java heap space
+    ```
+
+    or:
+
+    ```
+    java.lang.OutOfMemoryError: GC overhead limit exceeded
+    ```
+
+    **Likely cause**
+
+    Running both a mod loader and Bukkit plugins requires significantly more heap than a vanilla or plugins-only server. The default heap allocation in many start scripts (512 MB or 1 GB) is too small.
+
+    **Fix**
+
+    Add explicit heap flags to your Java start command. A reasonable starting point for a small Arclight server is:
+
+    ```bash
+    java -Xms2G -Xmx4G -jar arclight-forge-1.21.1.jar nogui
+    ```
+
+    Increase `-Xmx` if you run many mods or plugins, or if you have a large player count. For a full guide on JVM tuning, see [JVM flags](/configuration/jvm-flags).
+
+    <Tip>
+      Set `-Xms` and `-Xmx` to the same value to prevent the JVM from spending time resizing the heap during play.
+    </Tip>
+  </Accordion>
+
+</AccordionGroup>

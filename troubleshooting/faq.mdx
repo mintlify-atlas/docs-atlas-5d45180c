@@ -1,0 +1,145 @@
+---
+title: "Frequently asked questions about Arclight"
+description: "Answers to the most common questions about Arclight compatibility, setup, plugins, mods, updates, performance, and where to get help."
+---
+
+If you cannot find an answer here, check [common errors](/troubleshooting/common-errors) or open an issue on GitHub. Before reporting a bug, confirm that the issue does not reproduce on a plain Spigot server (for plugin problems) or a plain mod loader server (for mod problems).
+
+<AccordionGroup>
+
+  <Accordion title="Which Minecraft versions does Arclight support?">
+    Arclight actively supports the **1.20** and **1.21** series. Each release JAR targets a specific Minecraft version; the version is encoded in the file name (for example, `arclight-forge-1.21.1-1.0.0.jar`).
+
+    Older Minecraft versions are no longer actively maintained. If you need to run an older version, check the GitHub releases archive, but do not expect bug fixes for those builds.
+  </Accordion>
+
+  <Accordion title="Can I use Arclight with BungeeCord or Velocity?">
+    Yes, both proxy solutions work with Arclight.
+
+    - **Velocity**: Arclight detects Velocity support automatically via the `VelocitySupport` check at startup. Enable Velocity in `arclight.conf` (set `velocity.enable = true`) and configure your proxy as you would with any Spigot-based backend.
+    - **BungeeCord**: Controlled by the `bungeecord` flag in `spigot.yml`. When Velocity support is enabled, `SpigotConfig.bungee` is also set to `true` automatically; otherwise, edit `spigot.yml` directly.
+
+    <Note>
+      Always use a firewall or the proxy's IP-forwarding signing feature to prevent players from connecting directly to the backend and bypassing authentication. See [configuration overview](/configuration/spigot-config) for relevant settings.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Do I need to recompile my plugins for Arclight?">
+    No. Arclight includes a runtime remapper that automatically translates CraftBukkit and NMS class names as plugins are loaded. You can drop your existing plugin JARs into the `plugins/` folder without any recompilation.
+
+    The remapper uses SpecialSource with bundled mapping files (`bukkit_srg.srg` and `bukkit_moj.srg`) to handle class, method, and field name translation for each plugin's class loader. See [the remapper internals](/development/remapper) if you want to understand how this works in detail.
+
+    <Tip>
+      If a plugin still fails to load after remapping, enable the dump flag (`-Darclight.remapper.dump=./.mixin.out/plugin_classes`) to inspect the remapped bytecode. See [fixing ClassNotFoundException](/troubleshooting/common-errors) for the full procedure.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Does Arclight support Paper or Purpur plugins?">
+    Most plugins that use the public **Paper API** work correctly on Arclight. Arclight is based on Spigot, so it includes the Spigot API surface that Paper extends.
+
+    Plugins that depend on Paper-specific internals — such as direct access to Paper's internal classes, Paper's async chunk loading API, or Paper-only configuration objects — may fail or behave unexpectedly. If a Paper-only plugin does not work, check [known issues](/compatibility/known-issues) and the plugin's own documentation for Spigot compatibility notes.
+
+    Purpur-specific plugins are generally not supported unless they degrade gracefully to the Spigot/Paper API when Purpur is absent.
+  </Accordion>
+
+  <Accordion title="Where do I put my mods? Where do I put my plugins?">
+    The directories follow the conventions of each platform:
+
+    | Content | Directory |
+    | ------- | --------- |
+    | Mods (Forge, NeoForge, Fabric) | `mods/` |
+    | Bukkit/Spigot plugins | `plugins/` |
+
+    Both directories sit alongside the Arclight JAR in your server root. Create them manually if they do not exist on first run.
+
+    <Warning>
+      Do not place plugin JARs in `mods/` or mod JARs in `plugins/`. Arclight loads each directory with a different class loader pipeline, and mixing them will cause load failures.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="How do I update Arclight?">
+    Updating Arclight is straightforward because all server state lives in the working directory, not inside the JAR.
+
+    <Steps>
+      <Step title="Stop the server">
+        Run the `stop` command in the server console or send `SIGTERM` to the process. Wait for the shutdown to complete cleanly before continuing.
+      </Step>
+      <Step title="Download the new JAR">
+        Get the latest build for your Minecraft version from the Arclight releases page.
+      </Step>
+      <Step title="Replace the JAR">
+        Remove or rename the old JAR and place the new one in the same directory. Update your start script if the file name changed.
+      </Step>
+      <Step title="Start the server">
+        Launch the server. Arclight will re-extract and re-install any updated internal libraries automatically on first start with the new JAR.
+      </Step>
+    </Steps>
+
+    <Note>
+      You do not normally need to delete your `world/` folders, `plugins/` directory, or configuration files when updating Arclight unless a migration guide for a specific version tells you to.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Why is my server slow?">
+    Running a mod loader and Bukkit plugins in the same process is inherently more resource-intensive than running either alone. Common causes of poor performance:
+
+    - **Insufficient heap**: The JVM is spending too much time in garbage collection. Set `-Xms2G -Xmx4G` or higher. See [JVM flags](/configuration/jvm-flags) for tuning recommendations.
+    - **Too many mods and plugins**: Each loaded mod and plugin adds class loading overhead and tick processing. Profile which mod or plugin is consuming the most tick time using a tool such as Spark.
+    - **Chunk generation**: Modded Minecraft worlds with custom terrain generation are significantly slower to generate than vanilla. Pre-generate your world with a tool like Chunky.
+    - **Async API violations**: A plugin calling the Bukkit API from a background thread stalls the main thread. Check the server log for async catcher warnings.
+
+    For a detailed guide on JVM options that improve throughput and reduce pause times on Arclight, see [JVM flags](/configuration/jvm-flags).
+  </Accordion>
+
+  <Accordion title="Can I run Arclight in a Docker container?">
+    Yes. Treat the Arclight JAR like any other Minecraft server JAR when writing your `Dockerfile` or Compose file.
+
+    Key requirements:
+
+    - Use a **Java 21** base image (for example, `eclipse-temurin:21-jre`).
+    - Mount the server directory as a volume so world data, configs, mods, and plugins persist across container restarts.
+    - Pass `-Xms` and `-Xmx` flags appropriate for the container's memory limit.
+
+    A minimal example:
+
+    ```dockerfile
+    FROM eclipse-temurin:21-jre
+    WORKDIR /server
+    COPY arclight-forge-1.21.1.jar .
+    RUN echo "eula=true" > eula.txt
+    ENTRYPOINT ["java", "-Xms2G", "-Xmx4G", "-jar", "arclight-forge-1.21.1.jar", "nogui"]
+    ```
+
+    <Warning>
+      Never set `eula=true` in a public image without ensuring that users of the image have read and accepted Mojang's EULA.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Is Arclight free?">
+    Yes. Arclight is open-source software released under the **GNU General Public License v3 (GPL-3.0)**. You can use, modify, and distribute it subject to the terms of that licence.
+
+    The source code is hosted at [IzzelAliz/Arclight](https://github.com/IzzelAliz/Arclight) on GitHub. If you build on Arclight or distribute a modified version, the GPL requires you to make your changes available under the same licence.
+  </Accordion>
+
+  <Accordion title="Where do I report bugs?">
+    Report bugs at the GitHub issue tracker: [IzzelAliz/Arclight Issues](https://github.com/IzzelAliz/Arclight/issues).
+
+    Before opening an issue, confirm all of the following:
+
+    - You are using the latest Arclight build.
+    - You have checked this FAQ and [common errors](/troubleshooting/common-errors) and neither solves the problem.
+    - You have searched existing issues for a duplicate.
+    - The mods and plugins you use support your Minecraft version.
+    - The issue cannot be reproduced on a plain Spigot server (for plugin-related problems) or a plain mod loader server (for mod-related problems).
+
+    When filing the issue, include:
+
+    - **Platform**: Forge, NeoForge, or Fabric
+    - **Minecraft version** and **Arclight version** (printed at startup)
+    - **Java version** (output of `java --version`)
+    - **OS** and architecture
+    - **List of mods and plugins** (name and version)
+    - **Full server log** from `logs/latest.log` — upload to [mclo.gs](https://mclo.gs/) and paste the link rather than copying the text directly into the issue body
+  </Accordion>
+
+</AccordionGroup>

@@ -1,0 +1,59 @@
+---
+title: "Arclight: Bukkit and mods on one server"
+description: "Arclight is a Bukkit server implementation that runs inside Forge, NeoForge, and Fabric, letting you use Bukkit plugins and Minecraft mods side by side."
+---
+
+Arclight bridges two worlds that were never designed to coexist: the Bukkit plugin ecosystem and the Minecraft mod loader ecosystem. Instead of choosing between a plugin server and a mod server, you run a single Arclight server that speaks both languages at once.
+
+## What problem does Arclight solve?
+
+Vanilla Bukkit servers (Spigot, Paper, and their derivatives) support plugins but have no concept of mod loaders. Forge, NeoForge, and Fabric servers support mods but have no Bukkit API. Server owners who want both have historically had to maintain two separate servers or accept a severely limited experience on either side.
+
+Arclight embeds a full Bukkit/Spigot implementation directly inside a supported mod loader. Both the plugin API and the mod loader API operate against the same running game, sharing the same world, players, and entities. Plugins receive Bukkit events; mods receive mod loader events. Both work as their authors intended.
+
+## Supported platforms
+
+Arclight runs on three mod loader platforms across Minecraft 1.20 and 1.21:
+
+<CardGroup cols={3}>
+  <Card title="Forge" icon="hammer" href="/platforms/forge">
+    The original and most widely supported mod loader. Compatible with the largest library of Minecraft mods.
+  </Card>
+  <Card title="NeoForge" icon="wrench" href="/platforms/neoforge">
+    A community fork of Forge with an active development team. Recommended for newer 1.21 modpacks.
+  </Card>
+  <Card title="Fabric" icon="layers" href="/platforms/fabric">
+    A lightweight, fast mod loader popular for performance mods and technical Minecraft content.
+  </Card>
+</CardGroup>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Full Bukkit API" icon="plug">
+    Arclight implements the complete Spigot API. Plugins that target Spigot or CraftBukkit run without modification on any supported platform.
+  </Card>
+  <Card title="Native mod loader support" icon="box">
+    Mods load through the native mod loader pipeline. There is no compatibility layer — Forge mods run in Forge, Fabric mods run in Fabric.
+  </Card>
+  <Card title="Shared runtime" icon="server">
+    Plugins and mods share the same server process, world state, and player objects. They can interact with each other through their respective APIs.
+  </Card>
+  <Card title="Mixin-based integration" icon="code">
+    Arclight uses the Mixin framework to inject Bukkit behaviour into the mod loader's Minecraft code, keeping the integration clean and maintainable.
+  </Card>
+  <Card title="Bytecode remapping" icon="shuffle">
+    A built-in remapper translates between Bukkit's obfuscated mappings and the mod loader's named mappings at runtime, so plugins never need to be recompiled.
+  </Card>
+  <Card title="Open source" icon="github">
+    Arclight is licensed under GPL v3. The full source is available on [GitHub](https://github.com/IzzelAliz/Arclight).
+  </Card>
+</CardGroup>
+
+## Supported Minecraft versions
+
+Arclight currently targets **Minecraft 1.21.1** across all three platforms (Forge 52.1.5, NeoForge 21.1.216, Fabric Loader 0.18.2). Builds for 1.20 are also available; see the [downloads page](https://arclight.izzel.io) for the full version list and support status.
+
+## Next steps
+
+Ready to set up a server? Follow the [installation guide](/installation) to download Arclight and run it for the first time, or jump straight to the [quickstart](/quickstart) for a step-by-step walkthrough from download to your first plugin and mod running together.

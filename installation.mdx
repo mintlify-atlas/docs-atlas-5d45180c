@@ -1,0 +1,120 @@
+---
+title: "Install Arclight on your Minecraft server"
+description: "Download the Arclight JAR for Forge, NeoForge, or Fabric, accept the EULA, and launch your first Bukkit-and-mods Minecraft server in a few commands."
+---
+
+Arclight is distributed as a single self-contained JAR file. You choose a platform — Forge, NeoForge, or Fabric — and Arclight downloads everything else it needs on first launch. There is no separate mod loader installer to run beforehand.
+
+## Prerequisites
+
+Before you start, make sure your system meets the following requirements.
+
+<Steps>
+  <Step title="Install Java 21">
+    Arclight requires **Java 21 or later**. Earlier Java versions will not work.
+
+    Check your installed version:
+
+    ```bash
+    java -version
+    ```
+
+    If the output shows a version below 21, install a Java 21 JDK. [Eclipse Temurin](https://adoptium.net/) and [Amazon Corretto](https://aws.amazon.com/corretto/) are two reliable distributions.
+  </Step>
+
+  <Step title="Prepare a server directory">
+    Create a dedicated directory for your server. Arclight writes configuration files, world data, and downloaded dependencies relative to the working directory where you launch it.
+
+    ```bash
+    mkdir my-arclight-server
+    cd my-arclight-server
+    ```
+  </Step>
+</Steps>
+
+## Download the JAR
+
+Arclight provides three JAR files — one per supported mod loader platform. Download the one that matches your intended platform from the official downloads page at [https://arclight.izzel.io](https://arclight.izzel.io).
+
+| Platform | JAR filename pattern |
+|---|---|
+| Forge | `arclight-forge-<mc-version>.jar` |
+| NeoForge | `arclight-neoforge-<mc-version>.jar` |
+| Fabric | `arclight-fabric-<mc-version>.jar` |
+
+Where `<mc-version>` is the Minecraft version, for example `1.21.1`.
+
+<Warning>
+  Only download Arclight from [https://arclight.izzel.io](https://arclight.izzel.io) or the official [GitHub releases](https://github.com/IzzelAliz/Arclight). Third-party mirrors may distribute outdated or modified builds.
+</Warning>
+
+## Launch the server
+
+Place the downloaded JAR in your server directory and run the appropriate command for your platform.
+
+<CodeGroup>
+
+```bash Forge
+java -jar arclight-forge-1.21.1.jar nogui
+```
+
+```bash NeoForge
+java -jar arclight-neoforge-1.21.1.jar nogui
+```
+
+```bash Fabric
+java -jar arclight-fabric-1.21.1.jar nogui
+```
+
+</CodeGroup>
+
+The `nogui` argument tells Minecraft not to open the graphical server control panel window. On headless servers or any server where you manage the process from a terminal, you should always include `nogui`. Omitting it causes the server to attempt to open a Swing GUI, which will fail or produce errors in most server environments.
+
+<Tip>
+  For production servers, add JVM flags to control memory and garbage collection. See [JVM flags](/configuration/jvm-flags) for recommended settings.
+</Tip>
+
+## What happens on first run
+
+The first launch takes several minutes. Arclight needs to download and install the mod loader runtime before the server can start. Here is what happens in order:
+
+<Steps>
+  <Step title="Mod loader installation">
+    Arclight downloads and installs the underlying mod loader (Forge, NeoForge, or Fabric) and its libraries into a local cache directory. This only happens once per installation.
+  </Step>
+
+  <Step title="Minecraft server setup">
+    The Minecraft server JAR and its dependencies are downloaded and prepared. Arclight also applies the Bukkit patches to the server code at this stage.
+  </Step>
+
+  <Step title="Configuration generation">
+    On the first complete startup, Arclight generates the default configuration files:
+    - `eula.txt` — you must set `eula=true` in this file before the server fully starts
+    - `server.properties` — standard Minecraft server configuration
+    - `arclight.conf` — Arclight-specific settings
+    - `bukkit.yml`, `spigot.yml` — Bukkit and Spigot configuration files
+    - `plugins/` and `mods/` directories
+  </Step>
+
+  <Step title="Accept the EULA">
+    After the first partial launch, open `eula.txt` and change `eula=false` to `eula=true`. Then launch the server again. The server will fully start only after you accept the EULA.
+
+    ```properties
+    eula=true
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The mod loader installation cache is stored inside your server directory under a subdirectory managed by the platform (for example `.forge/` or `.fabric/`). Do not delete these directories or Arclight will need to re-download everything on the next launch.
+</Note>
+
+## Verify the installation
+
+A successful startup ends with a line similar to the following in the console:
+
+```
+[HH:MM:SS] [Server thread/INFO]: Done (X.XXXs)! For help, type "help"
+```
+
+You can now connect to your server from Minecraft. The next step is to install plugins and mods — see the [quickstart guide](/quickstart) for a walkthrough, or go directly to [plugin compatibility](/compatibility/plugins) and [mod compatibility](/compatibility/mods) for more detail.

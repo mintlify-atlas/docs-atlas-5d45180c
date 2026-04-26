@@ -1,0 +1,125 @@
+---
+title: "Build Arclight from source on Forge, NeoForge, and Fabric"
+description: "Learn how to clone the Arclight repository, compile all platform JARs with Gradle, and run a local development server for testing."
+---
+
+Building Arclight from source gives you complete control over the compiled output and is required if you want to test local changes before submitting them. The build system is Gradle, and all three platform targets — Forge, NeoForge, and Fabric — are built from the same repository.
+
+## Prerequisites
+
+You need the following tools installed before you begin:
+
+- **JDK 21** — the build toolchain is pinned to `JavaLanguageVersion.of(21)` in `build.gradle`. Other JDK versions will not work.
+- **Git** — required to clone the repository and to generate the `+<git-hash>` suffix embedded in every JAR name.
+
+<Note>
+  The first time you build, Gradle downloads Minecraft artifacts, mod loader JARs, Spigot sources, and mapping data. This can take 20–40 minutes depending on your connection. Subsequent builds are much faster thanks to the Gradle cache.
+</Note>
+
+## Clone the repository
+
+```bash
+git clone https://github.com/IzzelAliz/Arclight.git
+cd Arclight
+```
+
+## Build all platforms
+
+The `collect` task compiles all three platform modules, assembles the distributable bootstrap JARs, and copies them into `build/libs/` at the repository root:
+
+```bash
+./gradlew collect
+```
+
+This is the same command the CI pipeline runs on every push. The resulting files will be named using the pattern:
+
+```
+build/libs/arclight-<platform>-<mc-version>-<project-version>-<git-hash>.jar
+```
+
+For example: `arclight-forge-1.21.1-1.0.2-SNAPSHOT-a1b2c3d.jar`
+
+## Build individual platforms
+
+If you only need one platform JAR, run the corresponding bootstrap task directly:
+
+<CodeGroup>
+
+```bash Forge
+./gradlew :bootstrap:forgeJar
+```
+
+```bash NeoForge
+./gradlew :bootstrap:neoforgeJar
+```
+
+```bash Fabric
+./gradlew :bootstrap:fabricJar
+```
+
+</CodeGroup>
+
+Each task compiles only the platform-specific subproject and its shared `arclight-common` dependency, then assembles the single-file distributable JAR under `bootstrap/build/libs/`.
+
+## Run a development server
+
+The `bootstrap` subproject exposes `runProd*` tasks that build the JAR and immediately launch it as a local server. These tasks are the primary way to test changes end-to-end.
+
+<CodeGroup>
+
+```bash Forge
+./gradlew :bootstrap:runProdForge
+```
+
+```bash NeoForge
+./gradlew :bootstrap:runProdNeoforge
+```
+
+```bash Fabric
+./gradlew :bootstrap:runProdFabric
+```
+
+</CodeGroup>
+
+<Steps>
+  <Step title="Server working directory">
+    By default each task uses `bootstrap/run_prod/<platform>/` as its working directory. Gradle creates this directory automatically on first run.
+  </Step>
+  <Step title="Override with an environment variable">
+    Set `ARCLIGHT_PROD_DIR` to any absolute path to redirect all three tasks to a shared directory — useful when you want to keep your world and plugin files in one place:
+
+    ```bash
+    ARCLIGHT_PROD_DIR=/srv/mc-dev ./gradlew :bootstrap:runProdForge
+    ```
+  </Step>
+  <Step title="Accept the EULA">
+    On the first run the server exits immediately and writes `eula.txt`. Open the file, set `eula=true`, then re-run the task.
+  </Step>
+</Steps>
+
+<Tip>
+  The `runProd*` tasks pass `-Xmx4G` to the server JVM and enable `mixin.debug.export` and `mixin.dumpTargetOnFailure`, so Mixin-related errors produce detailed diagnostics in `.mixin.out/`.
+</Tip>
+
+## Output artifacts
+
+| Task | Output location | File name pattern |
+|---|---|---|
+| `collect` | `build/libs/` | `arclight-<platform>-<mc>-<ver>-<hash>.jar` |
+| `:bootstrap:forgeJar` | `bootstrap/build/libs/` | `arclight-forge-<mc>-<ver>.jar` |
+| `:bootstrap:neoforgeJar` | `bootstrap/build/libs/` | `arclight-neoforge-<mc>-<ver>.jar` |
+| `:bootstrap:fabricJar` | `bootstrap/build/libs/` | `arclight-fabric-<mc>-<ver>.jar` |
+
+## Reset build artifacts
+
+The `cleanBuild` task deletes the `build/libs/` directory for every subproject without touching Gradle's dependency cache:
+
+```bash
+./gradlew cleanBuild
+```
+
+Use this before a full rebuild to ensure no stale JARs are included in the output. The CI pipeline always runs `cleanBuild` before `build collect`.
+
+<Warning>
+  Do not run `./gradlew clean` unless you intend to delete all intermediate build outputs including the processed Spigot JAR. Regenerating that artifact adds significant time to the next build.
+</Warning>

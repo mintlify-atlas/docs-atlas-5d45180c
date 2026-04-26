@@ -1,0 +1,96 @@
+---
+title: "Bukkit plugin compatibility with Arclight"
+description: "Most Bukkit and Spigot plugins work with Arclight without modification. Learn what works, what may not, and how to install plugins."
+---
+
+Arclight is designed to run standard Bukkit and Spigot plugins alongside Forge, NeoForge, and Fabric mods. The vast majority of plugins install and run the same way they would on a plain Spigot or Paper server — drop the `.jar` into the `plugins/` folder and start the server.
+
+## How Arclight handles plugins
+
+Arclight includes a runtime remapper that translates CraftBukkit internal class references at load time. When a plugin references obfuscated or version-specific CraftBukkit internals (such as `org.bukkit.craftbukkit.v1_XX_RX`), the remapper rewrites those references to match the names used in the running environment. This means many plugins that target a specific CraftBukkit version still work on Arclight without any changes from the plugin author.
+
+Plugin loading follows the standard Bukkit plugin lifecycle — `onLoad()`, `onEnable()`, and `onDisable()` are called at the same points you would expect on any Bukkit-compatible server.
+
+## Installing plugins
+
+<Steps>
+  <Step title="Locate your server directory">
+    Find the folder where your Arclight server JAR lives.
+  </Step>
+  <Step title="Place the plugin JAR in the plugins/ folder">
+    Copy or move the plugin's `.jar` file into the `plugins/` subdirectory. Create the folder if it does not exist yet.
+
+    ```
+    server/
+    ├── arclight-forge-1.21.1.jar
+    ├── plugins/
+    │   └── MyPlugin-1.0.jar
+    └── mods/
+    ```
+  </Step>
+  <Step title="Start or restart the server">
+    The plugin will be picked up automatically on the next server start. You can also use `/reload confirm` for supported plugins, though a full restart is always safer.
+  </Step>
+</Steps>
+
+## Plugins that work without issues
+
+Most plugins that do not reach into Minecraft's internals work on Arclight without any changes. This includes:
+
+- Economy, permissions, and chat plugins (e.g., Vault-dependent plugins)
+- World management and protection plugins
+- Minigame frameworks that use the Bukkit API surface
+- Plugins that use only the public `org.bukkit.*` API
+
+## Plugins that may have issues
+
+<AccordionGroup>
+  <Accordion title="Plugins using NMS (net.minecraft.server) classes directly">
+    Some plugins access Minecraft internals by importing classes from `net.minecraft.server.*` or by using reflection to reach CraftBukkit's private implementation details. Arclight runs inside a mod loader that uses its own mapped names for Minecraft classes, which differ from the obfuscated names expected by NMS plugins.
+
+    Arclight's runtime remapper handles many common NMS access patterns automatically, but plugins that rely on unusually deep reflection or that hard-code specific field/method names may still fail. In those cases, the plugin author needs to update the plugin to use the Bukkit API or to be aware of the mapped environment.
+  </Accordion>
+  <Accordion title="Plugins that deeply reflect on CraftBukkit internals">
+    Plugins that use `Class.forName()` or `getDeclaredField()` / `getDeclaredMethod()` to access private CraftBukkit implementation classes at runtime bypass the remapper. These plugins may throw `ClassNotFoundException` or `NoSuchFieldException` errors. There is no general fix on Arclight's side for this pattern — it requires changes in the plugin itself.
+  </Accordion>
+  <Accordion title="Plugins that patch or replace server internals via agents">
+    Java agent-based plugins or plugins that attempt to redefine loaded classes (using `Instrumentation`) are unlikely to work reliably, because Arclight and the mod loader have already transformed many classes before the plugin is loaded.
+  </Accordion>
+</AccordionGroup>
+
+## Reporting a plugin compatibility issue
+
+If a plugin that works on Spigot or Paper does not work on Arclight, the issue is worth reporting. Before you open a report:
+
+<Note>
+  Confirm the issue cannot be reproduced on a plain Spigot server with the same plugin and Minecraft version. Plugin-specific bugs that exist on Spigot are not Arclight issues.
+</Note>
+
+When you open a [GitHub issue](https://github.com/IzzelAliz/Arclight/issues), include:
+
+- The Arclight version (printed at server startup)
+- The Minecraft version
+- The plugin name and version
+- The relevant section of `logs/latest.log`
+- Steps to reproduce the problem
+
+<Tip>
+  Test plugins on a staging server before deploying to production. Even if a plugin is broadly compatible, combinations of multiple plugins and mods can produce unexpected interactions that are easier to diagnose in an isolated environment.
+</Tip>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Mod compatibility" icon="puzzle-piece" href="/compatibility/mods">
+    Which mods work with Arclight and known integration details.
+  </Card>
+  <Card title="Known issues" icon="triangle-alert" href="/compatibility/known-issues">
+    Edge cases and current limitations across the plugin–mod bridge.
+  </Card>
+  <Card title="Remapper" icon="arrows-left-right" href="/development/remapper">
+    How the runtime remapper translates class references at load time.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting/common-errors">
+    Common errors and how to fix them.
+  </Card>
+</CardGroup>

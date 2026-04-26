@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Arclight",
+  "projectType": "framework",
+  "projectName": "Arclight",
+  "projectDescription": "A Bukkit server implementation that runs inside Forge, NeoForge, and Fabric mod loaders, enabling Bukkit/Spigot plugins and Minecraft mods to coexist on the same server.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#8548ba",
-    "light": "#d5b179",
-    "dark": "#6d95bc"
-  },
-  "favicon": "https://media.brand.dev/91c0481a-7a3c-4edb-957c-13d1f80a08cd.png",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/IzzelAliz/Arclight"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/IzzelAliz/Arclight"
-    }
-  },
+  "primaryColor": "#8548ba",
+  "lightColor": "#d5b179",
+  "darkColor": "#6d95bc",
   "navigation": {
     "tabs": [
       {
@@ -86,5 +73,28 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Run Bukkit/Spigot plugins on Forge, NeoForge, and Fabric mod loaders",
+    "Mixin-based patching system for deep Minecraft server integration",
+    "Runtime class remapper for plugin compatibility with obfuscated mod environments",
+    "Support for Minecraft 1.20 and 1.21",
+    "Multi-platform support: Forge, NeoForge, and Fabric",
+    "Bukkit registry bridge mapping mod entities/items to Bukkit API types",
+    "Async task and event system compatible with both Bukkit and mod event buses",
+    "Velocity/BungeeCord proxy support"
+  ],
+  "publicApiSurface": [
+    "io.izzel.arclight.api.Arclight",
+    "io.izzel.arclight.api.EnumHelper",
+    "io.izzel.arclight.api.Unsafe",
+    "io.izzel.arclight.common.mod.ArclightCommon.Api",
+    "io.izzel.arclight.common.mod.server.ArclightServer",
+    "io.izzel.arclight.common.mod.server.BukkitRegistry",
+    "io.izzel.arclight.common.mod.server.event.ArclightEventFactory",
+    "io.izzel.arclight.i18n.ArclightConfig",
+    "Launch command: java -jar arclight-forge-<mc>.jar nogui",
+    "Launch command: java -jar arclight-neoforge-<mc>.jar nogui",
+    "Launch command: java -jar arclight-fabric-<mc>.jar nogui"
+  ]
 }

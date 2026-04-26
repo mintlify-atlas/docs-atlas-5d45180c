@@ -1,0 +1,159 @@
+---
+title: "Spigot configuration in Arclight servers"
+description: "How spigot.yml applies to Arclight servers, covering proxy support, mob spawn limits, view distance, and settings relevant to running mods alongside plugins."
+---
+
+Arclight initializes Spigot configuration by calling `SpigotConfig.init(new File("./spigot.yml"))` during server startup, exactly as a standard Spigot or Paper server would. The file is created with defaults on first run and lives in your server's working directory. Standard Spigot documentation applies to almost all options — this page focuses on the settings that matter most in a mixed mod-and-plugin environment, plus the Arclight-specific behaviors that interact with `spigot.yml`.
+
+## File location
+
+`spigot.yml` sits alongside `arclight.conf` and `server.properties` in your server's working directory.
+
+```
+server/
+├── arclight.conf
+├── spigot.yml          ← Spigot configuration
+├── server.properties
+├── plugins/
+└── mods/
+```
+
+If `spigot.yml` is absent, Arclight writes a fresh copy with defaults at startup.
+
+## Velocity and BungeeCord proxy support
+
+Arclight has first-class support for Velocity modern forwarding, configured in `arclight.conf`. When `velocity.enable = true` in `arclight.conf`, Arclight automatically sets `SpigotConfig.bungee = true` at runtime without you touching `spigot.yml` directly.
+
+This means:
+
+- You do **not** need to manually set `bungeecord: true` in `spigot.yml` when using Velocity through Arclight.
+- If you use BungeeCord (not Velocity), you must set `bungeecord: true` in `spigot.yml` yourself.
+- Setting both `spigot.yml` `bungeecord: true` and `arclight.conf` `velocity.enable = true` simultaneously is not a supported configuration.
+
+```yaml spigot.yml (BungeeCord only)
+settings:
+  bungeecord: true
+```
+
+```hocon arclight.conf (Velocity — spigot.yml untouched)
+velocity {
+  enable = true
+  secret = "your-secret-here"
+}
+```
+
+See [Configure Arclight server behavior](/configuration/arclight-config) for the full Velocity configuration reference.
+
+## Mob spawn limits and activation ranges
+
+Mod-added mobs are registered in Bukkit's entity type registry by Arclight. Spigot's global mob spawn limits and per-category caps therefore apply to modded entities just as they do to vanilla ones.
+
+### Spawn limits
+
+The `world-settings.default.mob-spawn-range` and the per-category limits in `bukkit.yml` control how many mobs spawn per player. In a modded server these pools are shared between vanilla and modded entities, so you may need to raise limits if mods add many new spawnable creature types.
+
+```yaml spigot.yml
+world-settings:
+  default:
+    mob-spawn-range: 8
+```
+
+<Tip>
+  If modded mobs are not spawning at expected rates, check the spawn category Arclight has assigned them (logged during startup under `registry.entity-type`) and adjust the corresponding limit in `bukkit.yml`.
+</Tip>
+
+### Entity activation range
+
+Spigot's activation range system is enabled in Arclight by default via `optimization.use-activation-and-tracking-range = true` in `arclight.conf`. The ranges themselves are set in `spigot.yml`:
+
+```yaml spigot.yml
+world-settings:
+  default:
+    entity-activation-range:
+      animals: 32
+      monsters: 32
+      raiders: 48
+      misc: 16
+      water: 16
+      villagers: 32
+      flying-monsters: 32
+```
+
+Modded entities that do not fall neatly into a vanilla category may default to the `misc` range. If a mod's entities behave unexpectedly (for example, not pathfinding when players are nearby), try increasing `misc` or disabling activation range globally with `optimization.use-activation-and-tracking-range = false` in `arclight.conf`.
+
+## View distance and simulation distance
+
+These settings have a direct effect on how many mod-generated chunks are kept loaded:
+
+```yaml spigot.yml
+world-settings:
+  default:
+    view-distance: 10
+    simulation-distance: 10
+```
+
+Mods that rely on loaded chunks for automation (farms, contraptions, chunk loaders) are sensitive to `simulation-distance`. Lower values reduce tick load but may break mod features that require distant chunks to remain active. Consider using a chunk-loader mod rather than raising simulation distance globally.
+
+## Player list and chunk loading
+
+```yaml spigot.yml
+world-settings:
+  default:
+    max-tick-time:
+      tile: 50
+      entity: 50
+```
+
+In mixed servers the entity tick budget is shared between modded and vanilla entities. If the server consistently hits the `entity` tick cap and skips ticks, identify the heavy entity types (usually via `/tps` and a profiler) and use `arclight.conf`'s activation range controls rather than reducing this value, which can mask underlying performance problems.
+
+## Username validation
+
+Arclight provides its own username validation via `compatibility.valid-username-regex` in `arclight.conf`. The Spigot `settings.whitelist` and `online-mode` flags in `server.properties` still apply and take precedence over username format checks.
+
+## Restart command
+
+```yaml spigot.yml
+settings:
+  restart-on-crash: true
+  restart-script: ./start.sh
+```
+
+Arclight inherits Spigot's crash-restart behavior. Point `restart-script` at your actual startup script so that the server can restart itself after an unexpected shutdown.
+
+## Recommended baseline for modded servers
+
+The following `spigot.yml` snippet collects the settings most commonly tuned for mixed mod-and-plugin deployments:
+
+```yaml spigot.yml
+settings:
+  bungeecord: false          # Use arclight.conf velocity section instead
+  restart-on-crash: true
+  restart-script: ./start.sh
+
+world-settings:
+  default:
+    mob-spawn-range: 8
+    view-distance: 8         # Lower than default to reduce chunk load
+    simulation-distance: 6
+    entity-activation-range:
+      animals: 32
+      monsters: 32
+      raiders: 48
+      misc: 24               # Raise if modded entities misbehave
+      water: 16
+      villagers: 32
+      flying-monsters: 32
+    max-tick-time:
+      tile: 50
+      entity: 50
+```
+
+<Note>
+  All other `spigot.yml` options work exactly as documented in the upstream Spigot wiki. This page only highlights the settings where Arclight's behavior differs from or adds to standard Spigot.
+</Note>
+
+## Related pages
+
+- [Configure Arclight server behavior](/configuration/arclight-config) — `arclight.conf` reference including Velocity and compatibility settings
+- [JVM flags and system properties](/configuration/jvm-flags) — performance-oriented Java startup flags
+- [Known compatibility issues](/compatibility/known-issues) — mod and plugin combinations with documented quirks

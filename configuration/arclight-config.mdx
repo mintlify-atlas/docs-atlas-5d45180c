@@ -1,0 +1,205 @@
+---
+title: "Configure Arclight server behavior"
+description: "Complete reference for arclight.conf — covers optimization, compatibility overrides, async-catcher behavior, Velocity forwarding, and experimental settings."
+---
+
+Arclight reads its configuration from a file named `arclight.conf` in your server's working directory. The file uses [HOCON](https://github.com/lightbend/config/blob/main/HOCON.md) syntax. On first startup Arclight writes the file with default values and inline comments; you can edit it at any time and restart the server to apply changes. Most settings do not support live reload — a full server restart is required unless noted otherwise.
+
+## File location
+
+`arclight.conf` is written to the server's working directory — the same folder that contains `server.properties` and `spigot.yml`.
+
+```
+server/
+├── arclight.conf       ← Arclight configuration
+├── spigot.yml
+├── server.properties
+├── plugins/
+└── mods/
+```
+
+If the file is missing, Arclight recreates it from its embedded defaults at startup. You can delete `arclight.conf` to reset all options to their defaults.
+
+## Top-level structure
+
+The file is organized into six sections: `locale`, `optimization`, `compatibility`, `async-catcher`, `velocity`, and `experimental`.
+
+```hocon arclight.conf
+_v = 1
+
+locale {
+  fallback = "en_us"
+}
+optimization {
+  cache-plugin-class = true
+  goal-selector-update-interval = 2
+  use-activation-and-tracking-range = true
+}
+compatibility {
+  symlink-world = false
+  extra-logic-worlds = []
+  forward-permission = true
+  valid-username-regex = ""
+  isolate-plugin-class-loaders = []
+  isolate-adventure-from-modloader = false
+}
+async-catcher {
+  dump = true
+  warn = true
+  defaultOperation = block
+  overrides {}
+}
+velocity {
+  enable = false
+  secret = ""
+}
+experimental {
+  replaceable-base-world-generator = true
+}
+```
+
+## `locale` section
+
+Controls the language used for Arclight's console and log messages.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `locale.current` | string | *(auto-detected)* | The active locale. Set automatically from the detected environment; available values include `en_us`, `zh_cn`, `ko_kr`, `ru_ru`, `fr_fr`, `it_it`, and `es_es`. |
+| `locale.fallback` | string | `"en_us"` | Fallback locale used when a message is not translated in the active locale. |
+
+## `optimization` section
+
+Performance tuning options for mixed mod-and-plugin servers.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `optimization.cache-plugin-class` | boolean | `true` | Caches plugin class lookups to reduce repeated reflection overhead. |
+| `optimization.goal-selector-update-interval` | integer | `2` | How often (in ticks) mob AI goal selectors are re-evaluated. Higher values reduce CPU usage at the cost of mobs reacting to changes less frequently. `1` is equivalent to vanilla behavior. |
+| `optimization.use-activation-and-tracking-range` | boolean | `true` | Enables Spigot's activation range and tracking range optimizations. Disable this only if a specific mod conflicts with entity activation logic. |
+
+<Note>
+  `optimization.disable-data-fixer` does not appear in the HOCON spec classes but is referenced in locale messages. When enabled, legacy (pre-1.13) plugins are blocked and world upgrading is disabled to avoid DFU overhead. Use with caution on servers with older plugin bases.
+</Note>
+
+## `compatibility` section
+
+Options that adjust how Arclight bridges Bukkit and mod APIs.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `compatibility.symlink-world` | boolean | `false` | Creates symbolic links from mod dimension folders to names that match Bukkit world names. Improves plugin compatibility with multi-world plugins. **Changing this on a live server renames mod worlds and can cause data loss in plugins that store world names.** |
+| `compatibility.extra-logic-worlds` | list of strings | `[]` | Fully-qualified class names of additional world types that should receive Bukkit logic processing. If a mod world stops firing Bukkit events, search your logs for `[EXT_LOGIC]` and add the class name here. |
+| `compatibility.forward-permission` | string | `"true"` | Controls permission query forwarding between Forge and Bukkit. `"true"` forwards Forge permission queries to Bukkit. `"false"` disables forwarding. `"reverse"` forwards Bukkit player permission queries to Forge. |
+| `compatibility.valid-username-regex` | string | `""` | A regular expression applied to usernames during login. An empty string falls back to vanilla checks. Use `"^[ -~\\p{sc=Han}]{1,16}$"` to allow Chinese characters, or `".+"` to accept any username. |
+| `compatibility.isolate-plugin-class-loaders` | list of strings | `[]` | Package name prefixes that will not be accessible via illegal cross-plugin class loading. Add a package prefix here when class loading conflicts arise between plugins that share a common dependency. |
+| `compatibility.isolate-adventure-from-modloader` | boolean | `false` | Prevents plugins from loading the Kyori Adventure library through the mod loader's class loader. Enable this if you see Adventure version conflicts between plugins and mods. |
+
+<Warning>
+  Enabling `compatibility.symlink-world` on an existing server changes how mod dimension paths are resolved. Back up all world data before toggling this option.
+</Warning>
+
+### Material and entity property overrides
+
+The `compatibility.material-property-overrides` and `compatibility.entity-property-overrides` maps let you supply Bukkit-facing metadata for modded materials and entities that Arclight cannot infer automatically.
+
+**Material override fields** (`MaterialPropertySpec`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `maxStack` | integer | Maximum stack size for this item. |
+| `maxDurability` | integer | Maximum durability (tool damage). |
+| `edible` | boolean | Whether the item can be eaten. |
+| `solid` | boolean | Whether the block is solid. |
+| `transparent` | boolean | Whether the block is transparent. |
+| `flammable` | boolean | Whether the block is flammable. |
+| `burnable` | boolean | Whether the block can be burned away. |
+| `fuel` | boolean | Whether the item can be used as furnace fuel. |
+| `occluding` | boolean | Whether the block occludes adjacent faces. |
+| `gravity` | boolean | Whether the block falls under gravity. |
+| `interactable` | boolean | Whether the block has a right-click interaction. |
+| `hardness` | float | Block hardness value. |
+| `blastResistance` | float | Block blast resistance. |
+| `record` | boolean | Whether the item is a music disc. |
+| `air` | boolean | Whether the block counts as air. |
+| `craftingRemainingItem` | string | Registry key of the item left in a crafting slot after use. |
+| `itemMetaType` | string | Fully-qualified class name of a custom `ItemMeta` implementation. |
+| `blockStateClass` | string | Fully-qualified class name of a custom `BlockState` implementation. |
+| `materialDataClass` | string | Fully-qualified class name of a custom `MaterialData` implementation. |
+
+**Entity override fields** (`EntityPropertySpec`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entityClass` | string | Fully-qualified class name of the Bukkit `Entity` interface to expose for this entity type. |
+| `entityImplClass` | string | Fully-qualified class name of the CraftBukkit implementation class. |
+
+Example:
+```hocon
+compatibility {
+  material-property-overrides {
+    "mymod:special_block" {
+      solid = true
+      hardness = 3.0
+      blastResistance = 6.0
+    }
+  }
+}
+```
+
+## `async-catcher` section
+
+The async catcher intercepts calls to server internals that are made from off the main thread, which would otherwise cause data corruption or crashes.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `async-catcher.dump` | boolean | `true` | Writes a full stack trace to `debug.log` whenever an async violation is caught. |
+| `async-catcher.warn` | boolean | `true` | Logs a warning to the console when an async violation is caught. |
+| `async-catcher.defaultOperation` | enum | `block` | The action taken when an async violation is detected. See the table below. |
+| `async-catcher.overrides` | map | `{}` | Per-method overrides of `defaultOperation`. Keys are method identifiers; values are one of the four operation modes. |
+
+**Operation modes:**
+
+| Value | Behavior |
+|-------|----------|
+| `NONE` | No action. The call proceeds on the async thread. |
+| `DISPATCH` | The call is dispatched to the main thread without blocking the caller. |
+| `BLOCK` | The call is dispatched to the main thread and the async thread waits for the result. Recommended for most servers. |
+| `EXCEPTION` | An exception is thrown. Useful for plugin development to surface violations early. |
+
+## `velocity` section
+
+Arclight includes Velocity modern player info forwarding support, ported from Paper. When Velocity is enabled, Arclight automatically sets `SpigotConfig.bungee = true` so that Bukkit's proxy-mode APIs work correctly alongside it.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `velocity.enable` | boolean | `false` | Enables Velocity modern forwarding. Set this to `true` when your server sits behind a Velocity proxy. |
+| `velocity.secret` | string | `""` | The shared secret configured in your Velocity proxy's `velocity.toml`. This must match exactly. |
+
+<Warning>
+  Never share or commit your Velocity secret. Anyone who knows the secret can spoof player connections to your server.
+</Warning>
+
+## `experimental` section
+
+Experimental settings may change or be removed in future releases. Please report any problems you encounter.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `experimental.replaceable-base-world-generator` | boolean | `true` | Allows Bukkit chunk generators to replace the base world generator in mod-created dimensions. Useful for TerraBlender compatibility and Bukkit multi-world support with custom terrain. Setting this on an already-generated world may cause terrain tearing at chunk borders. |
+
+<Tip>
+  When using `experimental.replaceable-base-world-generator`, pass `Environment.CUSTOM` to `WorldCreator` so that Arclight uses `bukkit:<name>` as the level stem and respects an existing worldgen datapack.
+</Tip>
+
+## Applying changes
+
+Most `arclight.conf` options require a full server restart to take effect. There is no `/arclight reload` command for this file. The only exception is the locale, which is written fresh on each startup from the detected environment.
+
+After editing the file, restart the server with:
+
+```bash
+# Example with the Forge JAR
+java -Xms2G -Xmx4G -jar arclight-forge-*.jar nogui
+```
+
+See [JVM flags and system properties](/configuration/jvm-flags) for tuning the Java startup command.

@@ -1,0 +1,130 @@
+---
+title: "Running Arclight on Minecraft Forge 1.21.1"
+description: "Set up an Arclight server on Minecraft Forge to load Bukkit plugins and Forge mods side by side on a single server instance using Java 21."
+---
+
+Arclight on Forge lets you run a standard Bukkit/Spigot plugin ecosystem alongside Forge mods on a single server instance. Arclight registers itself as a regular Forge mod with the mod ID `arclight`, so Forge loads it like any other mod — but underneath, it initialises the full CraftBukkit server layer and bridges Forge's event bus to Bukkit's event system.
+
+## Prerequisites
+
+Before you start, make sure you have:
+
+- **Java 21** or later installed
+- The Arclight Forge JAR downloaded from the releases page
+- At least 4 GB of RAM allocated (8 GB recommended for mod-heavy servers)
+
+<Warning>
+  Arclight requires Java 21. Older JDK versions will fail to launch.
+</Warning>
+
+## Downloading the JAR
+
+The Forge distribution is packaged as a single self-contained launcher JAR. The file is named after the Minecraft version it targets:
+
+```
+arclight-forge-1.21.1.jar
+```
+
+This JAR bundles the Forge installer bootstrap and everything needed to download and set up Forge `1.21.1-52.1.5` on first run. You do not need to install Forge separately.
+
+## Starting the server
+
+<Steps>
+  <Step title="Accept the EULA">
+    Create a file named `eula.txt` in your server directory with the following content, or let the server generate it and then edit it:
+
+    ```text eula.txt
+    eula=true
+    ```
+  </Step>
+  <Step title="Run the JAR">
+    Launch the server with the `nogui` flag to disable the Swing console window:
+
+    ```bash
+    java -Xms2G -Xmx4G -jar arclight-forge-1.21.1.jar nogui
+    ```
+
+    On first run Arclight downloads Forge libraries and Minecraft itself. This can take several minutes depending on your connection.
+  </Step>
+  <Step title="Wait for setup to complete">
+    Once the initial download finishes, the server starts normally. You will see Forge loading mods in the log, followed by CraftBukkit and your plugins initialising.
+  </Step>
+</Steps>
+
+<Tip>
+  For JVM tuning options that improve performance on modded servers, see [JVM flags](/configuration/jvm-flags).
+</Tip>
+
+## Directory layout
+
+After the first run your server directory will look like this:
+
+```
+server/
+├── arclight-forge-1.21.1.jar   # The launcher JAR
+├── eula.txt
+├── server.properties
+├── arclight.conf                # Arclight-specific configuration
+├── mods/                        # Forge mods go here
+├── plugins/                     # Bukkit/Spigot plugins go here
+├── world/
+└── libraries/                   # Downloaded Forge libraries (auto-managed)
+```
+
+<Info>
+  Forge mods belong in `mods/`. Bukkit plugins belong in `plugins/`. Never put a plugin JAR in `mods/` or a Forge mod JAR in `plugins/`.
+</Info>
+
+## How Arclight bridges Forge and Bukkit events
+
+When the server starts, the `@Mod("arclight")` entry point calls `ArclightEventDispatcherRegistry.registerAllEventDispatchers()`. This registers a set of Forge event listeners that translate Forge events — such as block break, block place, entity interactions, and item drops — into their Bukkit equivalents and fire them on Bukkit's `PluginManager`. The result is that both Forge event subscribers and Bukkit event listeners receive the same underlying game events, coordinated through a shared translation layer.
+
+```java
+// Excerpt from ArclightMod.java — Forge platform entry point
+@Mod("arclight")
+public class ArclightMod {
+    public ArclightMod() {
+        Arclight.setServer(new ForgeArclightServer());
+        ArclightEventDispatcherRegistry.registerAllEventDispatchers();
+    }
+}
+```
+
+Bukkit plugins do not need any changes to work. Any plugin that runs on Spigot or Paper should function as expected, subject to the compatibility notes on the [plugin compatibility](/compatibility/plugins) page.
+
+## Forge mod compatibility
+
+Forge mods are loaded by the Forge mod loader in the standard way. Arclight does not interfere with the mod loading pipeline. However, mods that replace or heavily modify core world and entity code may conflict with the mixins Arclight applies. See the [mod compatibility](/compatibility/mods) page for details.
+
+<Warning>
+  Never place a Bukkit plugin in the `mods/` folder. Forge will attempt to parse it as a mod and fail.
+</Warning>
+
+## Forge version compatibility
+
+The current release targets **Minecraft 1.21.1** with **Forge 52.1.5**. The `mods.toml` loader version constraint is `[44,)`, meaning Forge 44 or later is accepted. Check the Arclight release page to confirm which Forge build corresponds to the JAR you downloaded before pairing it with manually installed mods that declare a specific Forge version range.
+
+<Tip>
+  When adding Forge mods, verify that the mod's `loaderVersion` range in its own `mods.toml` is compatible with the Forge version bundled in Arclight. A mismatch will print a dependency error at startup and prevent the mod from loading.
+</Tip>
+
+## Configuration
+
+Arclight's own settings live in `arclight.conf`. Plugin configuration files are written to `plugins/<plugin-name>/` as usual. For the full list of Arclight settings see [Arclight configuration](/configuration/arclight-config).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="NeoForge platform" icon="code" href="/platforms/neoforge">
+    Switch to the community-maintained NeoForge fork for the same Minecraft version.
+  </Card>
+  <Card title="Plugin compatibility" icon="puzzle" href="/compatibility/plugins">
+    Check which Bukkit plugins are known to work with Arclight.
+  </Card>
+  <Card title="Mod compatibility" icon="box" href="/compatibility/mods">
+    Review mod compatibility notes and known conflicts.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting/common-errors">
+    Diagnose startup errors and common runtime issues.
+  </Card>
+</CardGroup>

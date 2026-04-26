@@ -1,0 +1,185 @@
+---
+title: "Arclight architecture: bridging Bukkit and mods"
+description: "A technical deep dive into how Arclight layers a full CraftBukkit stack over Forge, NeoForge, and Fabric to run plugins and mods side-by-side."
+---
+
+Arclight is not a standalone server jar — it is a mod that lives inside an existing mod loader (Forge, NeoForge, or Fabric) and brings an entire Bukkit/CraftBukkit stack with it. Understanding how these two ecosystems are stitched together at runtime helps you reason about compatibility, diagnose conflicts, and contribute to the project.
+
+## Multi-module structure
+
+The Arclight repository is split into five Gradle subprojects. The `build.gradle` root configures them together with Architectury Loom and a custom `ArclightGradlePlugin`.
+
+<CardGroup cols={2}>
+  <Card title="arclight-common" icon="layer-group">
+    Platform-agnostic code: the Bukkit server bootstrap, all Mixin classes, the runtime remapper, BukkitRegistry, and the event bridge. This module is compiled once and depended on by every platform module.
+  </Card>
+  <Card title="arclight-forge" icon="cube">
+    Forge-specific platform adapter. Implements `ArclightCommon.Api`, registers the mod entry point, and provides Forge-flavoured event dispatchers.
+  </Card>
+  <Card title="arclight-neoforge" icon="cube">
+    NeoForge-specific adapter with the same responsibilities as the Forge module but targeting the NeoForge API surface.
+  </Card>
+  <Card title="arclight-fabric" icon="cube">
+    Fabric-specific adapter. Implements `ArclightCommon.Api` and bridges Fabric lifecycle events to Bukkit equivalents.
+  </Card>
+</CardGroup>
+
+A separate **bootstrap** subproject produces the distributable JARs. The `collect` Gradle task copies the final artifacts for all three platforms into `build/libs`.
+
+## Platform abstraction: `ArclightCommon.Api`
+
+`arclight-common` never calls the Forge, NeoForge, or Fabric APIs directly. Instead, every platform-specific operation is delegated through the `ArclightCommon.Api` interface defined in `ArclightCommon.java`:
+
+```java
+public interface Api {
+
+    byte[] platformRemapClass(byte[] cl);
+
+    boolean isModLoaded(String modid);
+
+    <T> Set<T> guavaReachableNodes(Graph<T> graph, T node);
+}
+```
+
+Each platform module calls `ArclightCommon.setInstance(api)` early in its mod initialisation to register a concrete implementation. Code in `arclight-common` retrieves it via `ArclightCommon.api()`. The `guavaReachableNodes` helper exists because Fabric and NeoForge ship different Guava versions whose `Graphs` method signatures differ; routing the call through the platform module avoids `NoSuchMethodError` at runtime.
+
+## JAR manifest and `MixinConnector`
+
+The final JAR for every platform has this attribute set in its manifest (from `build.gradle`):
+
+```
+MixinConnector: io.izzel.arclight.common.mod.ArclightConnector
+```
+
+When the mod loader initialises SpongePowered Mixin it discovers this attribute and calls `ArclightConnector.connect()` before any game classes are loaded. That single entry point registers all four mixin configuration sets and triggers the access widener, ensuring Arclight's patches are applied before Minecraft bytecode is first touched.
+
+## How the Bukkit server is created
+
+Arclight does not start a separate process. `CraftServer` — the CraftBukkit implementation of `org.bukkit.Server` — is instantiated inside the mod loader's server thread via `ArclightServer.createOrLoad`:
+
+```java
+public static CraftServer createOrLoad(DedicatedServer console, PlayerList playerList) {
+    if (server == null) {
+        server = new CraftServer(console, playerList);
+        ((MinecraftServerBridge) console).bridge$setServer(server);
+        ((MinecraftServerBridge) console).bridge$setConsole(ColouredConsoleSender.getInstance());
+
+        Class.forName("org.sqlite.JDBC");
+        Class.forName("com.mysql.cj.jdbc.Driver");
+
+        BukkitRegistry.registerAll(console);
+        SpigotConfig.init(new File("./spigot.yml"));
+        SpigotConfig.registerCommands();
+    } else {
+        ((CraftServerBridge) (Object) server).bridge$setPlayerList(playerList);
+    }
+    return server;
+}
+```
+
+`createOrLoad` is guarded so it runs only once. On subsequent calls (for example after a `/reload`) it just swaps the `PlayerList` reference. SQLite and MySQL JDBC drivers are loaded eagerly here so plugins can use them without worrying about class-loading order.
+
+`ArclightServer` also owns two shared executors used throughout the codebase:
+
+- **`mainThreadExecutor`** — marshals tasks onto the Minecraft server thread via `MinecraftServerBridge.bridge$queuedProcess`.
+- **`chatExecutor`** — a cached-thread-pool for async chat processing, using the context class loader of the server thread so plugin classes remain reachable.
+
+## BukkitRegistry: mapping mod types to Bukkit types
+
+Because Forge/Fabric mods can register new blocks, items, and entities at startup, the plain Bukkit enum constants like `Material` and `EntityType` do not cover them. `BukkitRegistry.registerAll` iterates every entry in the relevant `BuiltInRegistries` registries and dynamically extends the corresponding Bukkit enums and maps:
+
+```java
+public static void registerAll(DedicatedServer console) {
+    loadMaterials();
+    loadPotions();
+    loadEnchantmentTargets();
+    loadEntities();
+    loadBiomes(console);
+    loadArts(console);
+    loadStats();
+    // ... more registry types
+    for (var field : org.bukkit.Registry.class.getFields()) {
+        if (field.get(null) instanceof org.bukkit.Registry.SimpleRegistry<?> registry) {
+            ((SimpleRegistryBridge) (Object) registry).bridge$reload();
+        }
+    }
+}
+```
+
+Internally it uses `EnumHelper` and direct `Unsafe` field writes to add new constants to `Material`, `EntityType`, and `World.Environment` at runtime. This is the mechanism that lets plugins call `Material.valueOf("MODID_THING")` for mod-added blocks.
+
+## Event bridging
+
+Arclight fires both Bukkit events and native mod-loader events from the same point in the code. The `ArclightEventFactory` class (in the `core` mixin package) is called by mixin injections into vanilla classes. It fires the Bukkit event and, on platforms that support it, also dispatches the equivalent mod loader event. This means a Forge `BlockBreakEvent` and a Bukkit `BlockBreakEvent` both originate from the same mixin injection point and share the same cancellation state.
+
+## Architecture layers
+
+The following diagram shows how the runtime layers relate to each other:
+
+```
+┌─────────────────────────────────────────────┐
+│              Bukkit Plugins                 │
+│   (loaded through RemappingClassLoader)     │
+└────────────────────┬────────────────────────┘
+                     │ Bukkit API
+┌────────────────────▼────────────────────────┐
+│        CraftBukkit / CraftServer            │
+│   (ArclightServer.createOrLoad inits this)  │
+└────────────────────┬────────────────────────┘
+                     │ bridge$ methods
+┌────────────────────▼────────────────────────┐
+│          Arclight Mixin Layer               │
+│  core · bukkit · vanilla · optimization     │
+│  (applied by ArclightConnector at startup)  │
+└────────────────────┬────────────────────────┘
+                     │ patched bytecode
+┌────────────────────▼────────────────────────┐
+│        Minecraft (vanilla classes)          │
+└────────────────────┬────────────────────────┘
+                     │ mod loader hooks
+┌────────────────────▼────────────────────────┐
+│     Mod Loader (Forge / NeoForge / Fabric)  │
+│     + Mods registered by players            │
+└─────────────────────────────────────────────┘
+```
+
+## Mixin configuration sets
+
+Arclight registers four mixin configurations. `ArclightConnector.connect()` is the single place that adds all of them:
+
+```java
+Mixins.addConfiguration("mixins.arclight.core.json");
+Mixins.addConfiguration("mixins.arclight.bukkit.json");
+switch (ArclightPlatform.current()) {
+    case VANILLA -> Mixins.addConfiguration("mixins.arclight.vanilla.json");
+    case FORGE   -> Mixins.addConfiguration("mixins.arclight.forge.json");
+    case NEOFORGE -> Mixins.addConfiguration("mixins.arclight.neoforge.json");
+}
+Mixins.addConfiguration("mixins.arclight.impl.optimization.json");
+```
+
+| Config file | Package | Purpose |
+|---|---|---|
+| `mixins.arclight.core.json` | `mixin.core` | Core Bukkit server logic: events, entities, world, commands |
+| `mixins.arclight.bukkit.json` | `mixin.bukkit` | CraftBukkit implementation classes (`Craft*`) |
+| `mixins.arclight.vanilla.json` | `mixin.vanilla` | Vanilla-only patches not needed under Forge/NeoForge |
+| `mixins.arclight.impl.optimization.json` | `mixin.optimization` | Performance: activation range, tracking range, chunk loading |
+
+For a detailed breakdown of each set see [Arclight's mixin-based server patching](/development/mixin-system).
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Mixin system" href="/development/mixin-system">
+    Deep dive into the four mixin configurations and how ArclightMixinPlugin post-processes them.
+  </Card>
+  <Card title="Runtime remapper" href="/development/remapper">
+    How plugin classes are remapped at load time from CraftBukkit NMS names to Mojang names.
+  </Card>
+  <Card title="Building from source" href="/development/building">
+    How to build Arclight locally with Gradle.
+  </Card>
+  <Card title="Contributing" href="/development/contributing">
+    Guidelines for submitting patches.
+  </Card>
+</CardGroup>

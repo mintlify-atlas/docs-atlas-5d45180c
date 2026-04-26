@@ -1,133 +1,68 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "Arclight: Bukkit plugins + Minecraft mods, together"
+description: "Arclight runs Bukkit/Spigot plugins inside Forge, NeoForge, and Fabric mod loaders — bridging the plugin and modding ecosystems on a single Minecraft server."
 ---
 
-## Setting up
+Arclight is a Bukkit server implementation built on top of Minecraft mod loaders. Instead of choosing between Bukkit plugins and Forge/Fabric mods, Arclight lets you run both at the same time on a single server. It supports Minecraft 1.20 and 1.21 across three platforms: Forge, NeoForge, and Fabric.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Download the Arclight JAR for your platform and get your server running in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Launch your first Arclight server, install a plugin, and load a mod side by side.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Platform Guides" icon="layer-group" href="/platforms/forge">
+    Forge, NeoForge, and Fabric — each platform has its own setup guide and considerations.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Compatibility" icon="puzzle-piece" href="/compatibility/plugins">
+    Learn which plugins and mods are known to work, and how to report issues.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How Arclight works
 
-Everything you need to create world-class documentation.
+Arclight uses the [Mixin](https://github.com/SpongePowered/Mixin) framework to inject Bukkit/CraftBukkit behavior directly into the Minecraft server at runtime. It also includes a runtime class remapper that translates obfuscated CraftBukkit class references used by plugins into the correct mod-loader namespaced names — no plugin recompilation required.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Architecture overview" icon="sitemap" href="/development/architecture">
+    Understand how Arclight bridges Bukkit and mod loaders at a technical level.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Mixin system" icon="code-merge" href="/development/mixin-system">
+    How Arclight patches the Minecraft server using SpongePowered Mixin.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Runtime remapper" icon="arrows-rotate" href="/development/remapper">
+    How plugin classes are remapped at runtime to work in obfuscated environments.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Contributing" icon="code-pull-request" href="/development/contributing">
+    Build Arclight from source and contribute fixes or new platform support.
   </Card>
-</Columns>
+</CardGroup>
 
-## Make your content agent ready
+## Supported platforms
 
-Make your docs work for humans and AI agents alike.
+<CardGroup cols={3}>
+  <Card title="Forge" icon="hammer" href="/platforms/forge">
+    Minecraft Forge — the longest-running mod loader with the largest mod ecosystem.
+  </Card>
+  <Card title="NeoForge" icon="fire" href="/platforms/neoforge">
+    The community fork of Forge with active development and modern APIs.
+  </Card>
+  <Card title="Fabric" icon="feather" href="/platforms/fabric">
+    A lightweight, fast mod loader focused on clean APIs and rapid updates.
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+## Get help
 
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Steps>
+  <Step title="Check the troubleshooting guide">
+    Most startup and compatibility issues are covered in the [common errors](/troubleshooting/common-errors) and [FAQ](/troubleshooting/faq) pages.
+  </Step>
+  <Step title="Search GitHub issues">
+    Browse or file issues at [IzzelAliz/Arclight](https://github.com/IzzelAliz/Arclight/issues). Include your platform, Minecraft version, and the full server log.
+  </Step>
+  <Step title="Join the community">
+    Ask questions in [GitHub Discussions](https://github.com/IzzelAliz/Arclight/discussions) or join the [Discord server](https://discord.gg/ZvTY5SC).
+  </Step>
+</Steps>
